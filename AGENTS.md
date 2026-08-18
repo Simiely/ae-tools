@@ -25,6 +25,7 @@
 - UI 标签用中文；注释用中文；每目录一个 .jsx 主文件（+ 可选 test_*.js 模拟测试）
 - 每次改动遵循单项目规范：README / AGENTS / DEVELOPMENT / CHANGELOG 四件套同步（见知识库 `../单项目规范/README.md`）
 - 脚本头部保留 `Version / Description` 注释；版本号变更进 CHANGELOG
+- **待开发插件（禁止部署/安装）**：MountainSpectrum（2026-08-18 标注，内容已清理出主目录；源码在 `D:\workbuddy\2026-08-12-17-14-47\ae-scripts\MountainSpectrum.jsx`）
 
 ## 常用命令
 

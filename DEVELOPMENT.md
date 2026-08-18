@@ -2,7 +2,7 @@
 
 ## 一、项目概览
 
-ae-tools 是个人 AE 脚本工具集的 **monorepo**：8 个自写 ScriptUI 面板 + 1 个收集的外部脚本（asu_NudgeKeyFrames），配套一键部署器 `install.py`。定位：所有 AE 脚本的**唯一源码源**，AppData 里的安装副本只是部署产物——改代码 → 跑 `python install.py` → 全装好。
+ae-tools 是个人 AE 脚本工具集的 **monorepo**：7 个自写 ScriptUI 面板（MountainSpectrum 标注待开发、已移出）+ 1 个收集的外部脚本（asu_NudgeKeyFrames），配套一键部署器 `install.py`。定位：所有 AE 脚本的**唯一源码源**，AppData 里的安装副本只是部署产物——改代码 → 跑 `python install.py` → 全装好。
 
 演进：2026-08-18 从 7 个分散的 workspace 目录整合（原 8 个独立 git 仓库/目录 + 多份重复副本）→ 建 monorepo → 目录分离（自写/收集）→ 四件套文档。
 
@@ -10,7 +10,7 @@ ae-tools 是个人 AE 脚本工具集的 **monorepo**：8 个自写 ScriptUI 面
 
 ```
 ae-tools/
-├─ panels/                   自写 · ScriptUI 面板 ×8 → ScriptUI Panels（Window > Extensions）
+├─ panels/                   自写 · ScriptUI 面板 ×7（MountainSpectrum 待开发已移出）→ ScriptUI Panels（Window > Extensions）
 ├─ scripts/                  自写 · 无 UI 脚本（预留，当前空）
 ├─ third-party/scripts/      收集 · 外部脚本（asu_NudgeKeyFrames.jsx）→ Scripts（File > Scripts）
 ├─ install.py                一键部署器

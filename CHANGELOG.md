@@ -1,6 +1,11 @@
 # 更新日志（CHANGELOG）
 
-## v1.0.0（当前版本）
+## v1.0.1（当前版本）
+
+- MountainSpectrum 内容清理出主目录，标注「待开发」（WIP），暂不部署/安装
+- 源码保留在 `D:\workbuddy\2026-08-12-17-14-47\ae-scripts\MountainSpectrum.jsx`，待开发完成后再纳入
+
+## v1.0.0
 
 - 建立 ae-tools monorepo：整合 8 个自写 AE 插件（TimeAxisIndent / AE-Dashed-Grid-Generator / AE-Water-Rise-Generator / MountainSpectrum / AE-Rolling-Lyrics / AE-Lyrics-Animator / AudioScale / starry-sky-generator）
 - 收集脚本 asu_NudgeKeyFrames.jsx（外部免费脚本，sundstedt.se）归入 `third-party/scripts/`，与自写插件严格分离

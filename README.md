@@ -18,7 +18,7 @@ ae-tools/
 
 ## 工具总览
 
-### 自写插件（8）
+### 自写插件（7）
 
 | 工具 | 源码位置 | 类型 | AE 菜单 | 状态 | 原独立仓库 |
 |---|---|---|---|---|---|
@@ -30,6 +30,12 @@ ae-tools/
 | 歌词逐字散落动画 | `panels/AE-Lyrics-Animator/` | 面板 | Window > Extensions | 稳定 | Simiely/AE-Lyrics-Animator |
 | 音频缩放 AudioScale | `panels/AudioScale/` | 面板 | Window > Extensions | 稳定 | Simiely/AudioScale |
 | 星空生成器 starry-sky-generator | `panels/starry-sky-generator/` | 面板 | Window > Extensions | 稳定 | Simiely/starry-sky-generator |
+
+### 待开发（WIP，暂不部署）
+
+| 工具 | 说明 |
+|---|---|
+| 山峰频谱 MountainSpectrum | 内容已清理出主目录（2026-08-18），**待开发**，不部署、不安装；源码保留在 `D:\workbuddy\2026-08-12-17-14-47\ae-scripts\MountainSpectrum.jsx` |
 
 ### 收集的脚本（1）
 
