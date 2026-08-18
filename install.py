@@ -105,21 +105,31 @@ def main():
     scripts_dst = os.path.join(ae_root, "Scripts")
     print("AE 版本: %s (%s)" % (ver, ae_root))
 
-    panels = collect_jsx(os.path.join(HERE, "panels"))
-    scripts = collect_jsx(os.path.join(HERE, "scripts"))
+    targets = [
+        ("panels", "ScriptUI Panels", "自写面板"),
+        ("scripts", "Scripts", "自写脚本"),
+        (os.path.join("third-party", "panels"), "ScriptUI Panels", "收集面板"),
+        (os.path.join("third-party", "scripts"), "Scripts", "收集脚本"),
+    ]
 
-    print("== ScriptUI Panels (Window > Extensions) ==")
     ok_all = True
-    for src, name in panels:
-        ok_all &= deploy(src, os.path.join(panels_dst, name), args.dry_run)
-    print("== Scripts (File > Scripts) ==")
-    for src, name in scripts:
-        ok_all &= deploy(src, os.path.join(scripts_dst, name), args.dry_run)
+    counts = {}
+    for sub, folder, label in targets:
+        items = collect_jsx(os.path.join(HERE, sub))
+        if not items:
+            continue
+        dst_dir = panels_dst if folder == "ScriptUI Panels" else scripts_dst
+        print("== %s → %s ==" % (label, dst_dir))
+        for src, name in items:
+            ok_all &= deploy(src, os.path.join(dst_dir, name), args.dry_run)
+            counts[folder] = counts.get(folder, 0) + 1
 
+    n_panels = counts.get("ScriptUI Panels", 0)
+    n_scripts = counts.get("Scripts", 0)
     if args.dry_run:
-        print("共 %d 个面板脚本、%d 个脚本（dry-run，未写入）" % (len(panels), len(scripts)))
+        print("dry-run 清单完成（%d 面板 / %d 脚本，未写入）" % (n_panels, n_scripts))
     elif ok_all:
-        print("全部 %d + %d 个脚本部署成功，校验通过。重启 After Effects 后生效。" % (len(panels), len(scripts)))
+        print("全部 %d 面板 + %d 脚本部署成功，校验通过。重启 After Effects 后生效。" % (n_panels, n_scripts))
     else:
         print("存在部署失败项，请检查上述 FAIL 行。")
         sys.exit(1)
