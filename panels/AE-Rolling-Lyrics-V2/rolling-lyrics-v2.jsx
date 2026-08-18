@@ -77,7 +77,7 @@
     var DEFAULTS = {
         maxSize: 60, normalSize: 40, gap: 145,
         maxOpacity: 100, normalOpacity: 30,
-        scrollFrames: 30, pauseFrames: 20,
+        scrollFrames: 9, pauseFrames: 30,
         pauseRandom: false, jitterFrames: 10,
         fitLong: true,
         linesPerScroll: 1, multiGap: 145   // V2：一次滚动句数（1/2/3）+ 组内行间距 (px)
