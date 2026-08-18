@@ -65,6 +65,16 @@ step = multiGap*(k-1) + gap        ← 组与组的中心间距
 
 - 预防：README 注明"同合成用同一版生成"
 
+### 问题：组滚动句位置偏移基准错误，歌词整体错位 + 组切换跳变
+
+**TL;DR**：句位置用了 `ctrlY + (rel - idx*step)`，把"相对第 0 组中心的偏移"与"当前组索引"耦合，导致 idx=0 时组0 不在画面中心（整体错位 290px），且随 idx 变化偏移突跳。正确公式：`ctrlY + rel - ((mnum-1)/2)*step`（**固定偏移**，滚动动画由 ctrl 的 linear 插值提供）。
+
+- 问题：播放时歌词错位跳动；k=1 时句0 也不在中心
+- 根因：v1 的句偏移是 `(i - half)*g`（相对 ctrl 参考点的**固定偏移**）；V2 误写成 `(rel - idx*step)`（把 idx 卷进偏移，破坏固定性）
+- 解决：偏移固定为 `rel_i - ((mnum-1)/2)*step`；句子 y = ctrl 动态位置 + 固定偏移，与 v1 同构（ctrl 的 y0/y1 = H/2 + ((mnum-1)/2 - idx)*step 本就正确）
+- 验证：新增 `test_rolling_lyrics_v2.js` 模拟测试（14 断言）守护，改动表达式必须跑测试
+- 预防：任何句位置/缩放表达式改动，先跑 `node test_rolling_lyrics_v2.js`
+
 ## 四、文档基线（断点续传）
 
 - 2026-08-18（commit `86ee42e`）：修复 buildController 漏传新参数（v2.0.3）

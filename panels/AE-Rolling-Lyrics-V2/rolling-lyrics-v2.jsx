@@ -482,39 +482,37 @@
         SCRIPTS.core.addCheckboxControl(ctrl, "停顿随机", params.pauseRandom);
         SCRIPTS.core.addSliderControl(ctrl, "抖动帧数", params.jitterFrames);
 
-        // 滚动位置表达式（V2：按「组」滚动）。
+        // 滚动位置表达式（V2：按「组」滚动；全部显式 var，消除未声明变量污染）。
         // m 组，组步长 step = mg*(k-1) + g（组内 k-1 个组内行间距 + 组间 1 个间距）；
         // 循环"停留+滚动"m-1 次；当前组中心 y = 画面中心 - (idx-(m-1)/2)*step。
-        // 停顿随机开启时，每组停顿 = 停顿帧数 ± 抖动帧数（seedRandom 确定性随机，
-        // 同一种子流算出每组累积开始时间与当前组停顿，保证每组稳定不闪烁）
         var frameDur = comp.frameDuration;
         ctrl.transform.position.expression = [
-            "f = 1/thisComp.frameDuration;",
-            "sc = effect(\"滚动帧数\")(1);",
-            "pc = effect(\"停顿帧数\")(1);",
-            "jitOn = effect(\"停顿随机\")(1);",
-            "jit = effect(\"抖动帧数\")(1);",
-            "g = effect(\"间距\")(1);",
-            "mg = effect(\"组内行间距\")(1);",
-            "k = Math.max(1, Math.round(effect(\"滚动句数\")(1)));",
-            "n = " + n + ";",
-            "m = Math.max(1, Math.ceil(n/k));",
-            "step = mg*(k-1) + g;",
-            "times = [0];",
-            "t = 0;",
-            "for (i = 0; i < m - 1; i++) {",
+            "var f = 1/thisComp.frameDuration;",
+            "var sc = effect(\"滚动帧数\")(1);",
+            "var pc = effect(\"停顿帧数\")(1);",
+            "var jitOn = effect(\"停顿随机\")(1);",
+            "var jit = effect(\"抖动帧数\")(1);",
+            "var g = effect(\"间距\")(1);",
+            "var mg = effect(\"组内行间距\")(1);",
+            "var k = Math.max(1, Math.round(effect(\"滚动句数\")(1)));",
+            "var n = " + n + ";",
+            "var m = Math.max(1, Math.ceil(n/k));",
+            "var step = mg*(k-1) + g;",
+            "var times = [0];",
+            "var t = 0;",
+            "for (var i = 0; i < m - 1; i++) {",
             "  seedRandom(i + 11000, true);",
-            "  jp = pc + (jitOn > 0.5 ? jit * (random() * 2 - 1) : 0);",
+            "  var jp = pc + (jitOn > 0.5 ? jit * (random() * 2 - 1) : 0);",
             "  t += (sc + jp)/f;",
             "  times.push(t);",
             "}",
-            "idx = 0;",
+            "var idx = 0;",
             "while (idx < m - 1 && time >= times[idx + 1]) { idx++; }",
             "seedRandom(idx + 11000, true);",
-            "jp = pc + (jitOn > 0.5 ? jit * (random() * 2 - 1) : 0);",
-            "lt = time - times[idx];",
-            "y0 = thisComp.height/2 - (idx - (m-1)/2)*step;",
-            "y1 = thisComp.height/2 - (Math.min(idx + 1, m - 1) - (m-1)/2)*step;",
+            "var jp = pc + (jitOn > 0.5 ? jit * (random() * 2 - 1) : 0);",
+            "var lt = time - times[idx];",
+            "var y0 = thisComp.height/2 - (idx - (m-1)/2)*step;",
+            "var y1 = thisComp.height/2 - (Math.min(idx + 1, m - 1) - (m-1)/2)*step;",
             "if (lt <= jp/f) { [thisComp.width/2, y0]; }",
             "else { [thisComp.width/2, linear(lt, jp/f, jp/f + sc/f, y0, y1)]; }"
         ].join("\n");
@@ -525,73 +523,74 @@
     };
 
     // 给一句歌词挂三条表达式（V2：按「组」计算）。
-    // i / n：句索引与总句数；k：组大小（一次滚动几句）；centerX/centerY：画面中心；
-    // cap：该句放大比上限（null=不限制）。
-    // 位置 = 当前组中心 (Lyrics_Ctrl) + 组内相对偏移；
-    // 缩放/透明度按「组中心」到画面中心距离 → 整组一起放大一起变亮。
-    SCRIPTS.core.attachExpressions = function (L, i, n, k, centerX, centerY, cap) {
+    // i / n：句索引与总句数；centerX/centerY：画面中心；cap：该句放大比上限（null=不限制）。
+    // 位置 = Lyrics_Ctrl 动态组中心 + 组内相对偏移（滚动动画由控制器 linear 插值提供，
+    //       句子平滑跟随——v1 验证过的模式，绝不能换成静态组中心，否则组切换时突跳）；
+    // 缩放/透明度按「组中心」到画面中心距离 → 整组一致。
+    SCRIPTS.core.attachExpressions = function (L, i, n, centerX, centerY, cap) {
+        // 组滚动节奏代码段（控制器与每条表达式共用同一套算法，保证 idx 一致）
+        function rhythm() {
+            return [
+                "var kk = Math.max(1, Math.round(c.effect(\"滚动句数\")(1)));",
+                "var nn = " + n + ";",
+                "var mg = c.effect(\"组内行间距\")(1);",
+                "var g = c.effect(\"间距\")(1);",
+                "var step = mg*(kk-1) + g;",
+                "var f = 1/thisComp.frameDuration;",
+                "var sc = c.effect(\"滚动帧数\")(1);",
+                "var pc = c.effect(\"停顿帧数\")(1);",
+                "var jitOn = c.effect(\"停顿随机\")(1);",
+                "var jit = c.effect(\"抖动帧数\")(1);",
+                "var mnum = Math.max(1, Math.ceil(nn/kk));",
+                "var times = [0];",
+                "var t = 0;",
+                "for (var jj = 0; jj < mnum - 1; jj++) {",
+                "  seedRandom(jj + 11000, true);",
+                "  var jp = pc + (jitOn > 0.5 ? jit * (random() * 2 - 1) : 0);",
+                "  t += (sc + jp)/f;",
+                "  times.push(t);",
+                "}",
+                "var idx = 0;",
+                "while (idx < mnum - 1 && time >= times[idx + 1]) { idx++; }"
+            ].join("\n");
+        }
+
         L.transform.position.expression = [
-            "c = thisComp.layer(\"" + CTRL_NAME + "\");",
-            "m = thisComp.layer(\"" + MASTER_NAME + "\").transform.position;",
-            "g = c.effect(\"间距\")(1);",
-            "mg = c.effect(\"组内行间距\")(1);",
-            "kk = Math.max(1, Math.round(c.effect(\"滚动句数\")(1)));",
-            "nn = " + n + ";",
-            "i = " + i + ";",
-            "step = mg*(kk-1) + g;",
-            "gi = Math.floor(i/kk);",
-            "ii = i - gi*kk;",
-            // 当前组索引 idx（与 Lyrics_Ctrl 位置表达式同算法，同 seedRandom 流）
-            "f = 1/thisComp.frameDuration;",
-            "sc = c.effect(\"滚动帧数\")(1);",
-            "pc = c.effect(\"停顿帧数\")(1);",
-            "jitOn = c.effect(\"停顿随机\")(1);",
-            "jit = c.effect(\"抖动帧数\")(1);",
-            "mnum = Math.max(1, Math.ceil(nn/kk));",
-            "times = [0];",
-            "t = 0;",
-            "for (jj = 0; jj < mnum - 1; jj++) {",
-            "  seedRandom(jj + 11000, true);",
-            "  jp = pc + (jitOn > 0.5 ? jit * (random() * 2 - 1) : 0);",
-            "  t += (sc + jp)/f;",
-            "  times.push(t);",
-            "}",
-            "idx = 0;",
-            "while (idx < mnum - 1 && time >= times[idx + 1]) { idx++; }",
-            "rel = gi*step + (ii - (kk-1)/2)*mg;",
-            "y = c.transform.position[1] + (rel - idx*step);",
+            "var c = thisComp.layer(\"" + CTRL_NAME + "\");",
+            "var m = thisComp.layer(\"" + MASTER_NAME + "\").transform.position;",
+            rhythm(),
+            "var gi = Math.floor(" + i + "/kk);",
+            "var ii = " + i + " - gi*kk;",
+            "var rel = gi*step + (ii - (kk-1)/2)*mg;",
+            "var y = c.transform.position[1] + (rel - ((mnum-1)/2)*step);",
             "[" + centerX + " + (m[0] - " + centerX + "), y + (m[1] - " + centerY + ")]"
         ].join("\n");
+
         L.transform.scale.expression = [
-            "c = thisComp.layer(\"" + CTRL_NAME + "\");",
-            "m = thisComp.layer(\"" + MASTER_NAME + "\").transform.position;",
-            "maxS = c.effect(\"最大字号\")(1);",
-            "norS = c.effect(\"普通字号\")(1);",
-            "g = c.effect(\"间距\")(1);",
-            "mg = c.effect(\"组内行间距\")(1);",
-            "kk = Math.max(1, Math.round(c.effect(\"滚动句数\")(1)));",
-            "step = mg*(kk-1) + g;",
-            "maxDist = Math.max(thisComp.height * 0.25, step * 1.5);",
+            "var c = thisComp.layer(\"" + CTRL_NAME + "\");",
+            "var m = thisComp.layer(\"" + MASTER_NAME + "\").transform.position;",
+            rhythm(),
+            "var maxS = c.effect(\"最大字号\")(1);",
+            "var norS = c.effect(\"普通字号\")(1);",
+            "var maxDist = Math.max(thisComp.height * 0.25, step * 1.5);",
             (cap === null)
-                ? "ratio = maxS / norS;"
-                : "ratio = Math.min(maxS / norS, " + cap.toFixed(4) + ");",
-            "d = Math.abs(c.transform.position[1] - m[1]);",
-            "dd = Math.min(d, maxDist);",
-            "s = ease(dd, 0, maxDist, ratio * 100, 100);",
+                ? "var ratio = maxS / norS;"
+                : "var ratio = Math.min(maxS / norS, " + cap.toFixed(4) + ");",
+            "var d = Math.abs(c.transform.position[1] - m[1]);",
+            "var dd = Math.min(d, maxDist);",
+            "var s = ease(dd, 0, maxDist, ratio * 100, 100);",
             "[s, s]"
         ].join("\n");
+
         L.transform.opacity.expression = [
-            "c = thisComp.layer(\"" + CTRL_NAME + "\");",
-            "m = thisComp.layer(\"" + MASTER_NAME + "\").transform.position;",
-            "maxO = c.effect(\"最大透明度\")(1);",
-            "norO = c.effect(\"普通透明度\")(1);",
-            "g = c.effect(\"间距\")(1);",
-            "mg = c.effect(\"组内行间距\")(1);",
-            "kk = Math.max(1, Math.round(c.effect(\"滚动句数\")(1)));",
-            "step = mg*(kk-1) + g;",
-            "maxDist = Math.max(thisComp.height * 0.25, step * 1.5);",
-            "d = Math.abs(c.transform.position[1] - m[1]);",
-            "dd = Math.min(d, maxDist);",
+            "var c = thisComp.layer(\"" + CTRL_NAME + "\");",
+            "var m = thisComp.layer(\"" + MASTER_NAME + "\").transform.position;",
+            rhythm(),
+            "var maxO = c.effect(\"最大透明度\")(1);",
+            "var norO = c.effect(\"普通透明度\")(1);",
+            "var maxDist = Math.max(thisComp.height * 0.25, step * 1.5);",
+            "var d = Math.abs(c.transform.position[1] - m[1]);",
+            "var dd = Math.min(d, maxDist);",
             "ease(dd, 0, maxDist, maxO, norO)"
         ].join("\n");
     };
@@ -678,9 +677,9 @@
         var targetDur = ctl.endFrames * comp.frameDuration;
         if (targetDur > comp.duration) { comp.duration = targetDur; }
 
-        // ---- 挂表达式（全部引用 Lyrics_Ctrl 上的参数控件） ----
+        // ---- 挂表达式（全部引用 Lyrics_Ctrl 上的参数控件；每句自包含） ----
         for (i = 0; i < n; i++) {
-            SCRIPTS.core.attachExpressions(layers[i], i, n, linesPerScroll, comp.width / 2, comp.height / 2, caps[i]);
+            SCRIPTS.core.attachExpressions(layers[i], i, n, comp.width / 2, comp.height / 2, caps[i]);
         }
 
         return {

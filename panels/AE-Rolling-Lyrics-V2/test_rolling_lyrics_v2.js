@@ -1,0 +1,156 @@
+// test_rolling_lyrics_v2.js
+// Rolling Lyrics V2 组滚动逻辑模拟测试（Node 直接运行）
+// 用法: node test_rolling_lyrics_v2.js
+// 作用: 在 Node 里复刻 V2 表达式算法，验证布局/滚动连续性/整组缩放，避免"盲发"到 AE。
+// 注意: 这里的算法必须与 rolling-lyrics-v2.jsx 里 attachExpressions / buildController 的表达式保持一致。
+//
+// 核心公式（v1 语义推广到组）：
+//   参考点 ctrlY(停顿, idx) = H/2 + ((mnum-1)/2 - idx)*step   （滚动时线性插值到 idx+1）
+//   句 i 相对参考点的固定偏移 = rel_i - ((mnum-1)/2)*step
+//   句 i y = ctrlY(动态) + rel_i - ((mnum-1)/2)*step
+//   rel_i = gi*step + (ii-(kk-1)/2)*mg，gi=⌊i/k⌋，ii=i mod k，step=mg*(k-1)+g
+// 语义：idx=0 时第 0 组中心在画面中心（组0 的句子围绕 H/2 对称），滚动时整列平滑上移 step。
+
+// ---- AE 表达式环境 polyfill ----
+var _seed = 0;
+function seedRandom(seed, timeless) { _seed = seed; }
+function random() {
+    _seed = (_seed * 1103515245 + 12345) % 2147483648;
+    return _seed / 2147483648;
+}
+function ease(t, t1, t2, v1, v2) {
+    if (t <= t1) { return v1; }
+    if (t >= t2) { return v2; }
+    var p = (t - t1) / (t2 - t1);
+    return v1 + (v2 - v1) * p;
+}
+function linear(t, t1, t2, v1, v2) { return ease(t, t1, t2, v1, v2); }
+
+// ---- 复刻 V2 组滚动核心（与 JSX 表达式同算法） ----
+function rhythmTimes(n, kk, params, f) {
+    var mnum = Math.max(1, Math.ceil(n / kk));
+    var times = [0], t = 0;
+    for (var jj = 0; jj < mnum - 1; jj++) {
+        seedRandom(jj + 11000, true);
+        var jp = params.pauseFrames + (params.pauseRandom ? params.jitterFrames * (random() * 2 - 1) : 0);
+        t += (params.scrollFrames + jp) / f;
+        times.push(t);
+    }
+    return { mnum: mnum, times: times };
+}
+function groupIndex(times, time) {
+    var idx = 0;
+    while (idx < times.length - 1 && time >= times[idx + 1]) { idx++; }
+    return idx;
+}
+
+// 控制器 y（复刻 ctrl 位置表达式：停顿 y0 / 滚动 linear 到 y1）
+function ctrlY(n, kk, params, time, f, H) {
+    var mg = params.multiGap, g = params.gap;
+    var step = mg * (kk - 1) + g;
+    var rt = rhythmTimes(n, kk, params, f);
+    var idx = groupIndex(rt.times, time);
+    seedRandom(idx + 11000, true);
+    var jp = params.pauseFrames + (params.pauseRandom ? params.jitterFrames * (random() * 2 - 1) : 0);
+    var lt = time - rt.times[idx];
+    var y0 = H / 2 + ((rt.mnum - 1) / 2 - idx) * step;
+    var y1 = H / 2 + ((rt.mnum - 1) / 2 - Math.min(idx + 1, rt.mnum - 1)) * step;
+    if (lt <= jp / f) { return y0; }
+    return linear(lt, jp / f, jp / f + params.scrollFrames / f, y0, y1);
+}
+
+// 句 i 的 y（复刻句位置表达式：引用 ctrl 动态位置 + 固定偏移）
+function lyricY(i, n, kk, params, time, f, H) {
+    var mg = params.multiGap, g = params.gap;
+    var step = mg * (kk - 1) + g;
+    var rt = rhythmTimes(n, kk, params, f);
+    var cy = ctrlY(n, kk, params, time, f, H); // 动态组中心（含滚动插值）
+    var gi = Math.floor(i / kk), ii = i - gi * kk;
+    var rel = gi * step + (ii - (kk - 1) / 2) * mg;
+    return cy + (rel - ((rt.mnum - 1) / 2) * step);
+}
+
+// ---- 断言工具 ----
+var passed = 0, failed = 0;
+function assert(cond, msg) {
+    if (cond) { passed++; console.log("  ✓ " + msg); }
+    else { failed++; console.log("  ✗ FAIL: " + msg); }
+}
+function nearly(a, b, eps) { return Math.abs(a - b) <= (eps || 0.001); }
+
+// ---- 默认参数（与 DEFAULTS 一致） ----
+var P = { maxSize: 60, normalSize: 40, gap: 145, multiGap: 145, linesPerScroll: 1,
+          scrollFrames: 9, pauseFrames: 30, pauseRandom: false, jitterFrames: 10 };
+var FPS = 30, H = 1080;
+
+console.log("== 用例 1: k=1（默认，应等同 v1 单句滚动）==");
+P.linesPerScroll = 1;
+var n1 = 5;
+// idx=0（time=0）时句0 在画面中心
+assert(nearly(lyricY(0, n1, 1, P, 0, FPS, H), H / 2), "句0 在画面中心 (idx=0)");
+assert(nearly(lyricY(2, n1, 1, P, 0, FPS, H), H / 2 + 2 * P.gap), "句2 = 中心下方 2*gap");
+// 相邻句间距 = gap
+assert(nearly(lyricY(0, n1, 1, P, 0, FPS, H) - lyricY(1, n1, 1, P, 0, FPS, H), -P.gap), "相邻句间距 = gap");
+
+console.log("== 用例 2: k=2, n=5 布局（组0 中心在画面中心）==");
+P.linesPerScroll = 2;
+var n2 = 5;
+var ys = [];
+for (var i = 0; i < n2; i++) { ys.push(lyricY(i, n2, 2, P, 0, FPS, H)); }
+assert(nearly(ys[0], H / 2 - 0.5 * P.multiGap), "句0 = H/2 - 0.5*mg（组0 内上句）(" + ys[0].toFixed(1) + ")");
+assert(nearly(ys[1], H / 2 + 0.5 * P.multiGap), "句1 = H/2 + 0.5*mg（组0 内下句）(" + ys[1].toFixed(1) + ")");
+assert(nearly(ys[2] - ys[1], P.gap), "组间相邻句间距 = gap (" + (ys[2] - ys[1]).toFixed(1) + ")");
+assert(nearly(ys[3] - ys[2], P.multiGap), "组内(句2->句3)间距 = mg (" + (ys[3] - ys[2]).toFixed(1) + ")");
+// 组0 中心 = 画面中心（对称）
+assert(nearly((ys[0] + ys[1]) / 2, H / 2), "组0 中心 = 画面中心（对称）");
+
+console.log("== 用例 3: 滚动连续性（逐帧扫描，y 平滑不跳变）==");
+var prev = null, maxJump = 0;
+for (var fr = 0; fr < 180; fr++) {
+    var t = fr / FPS;
+    var y = lyricY(1, n2, 2, P, t, FPS, H);
+    if (prev !== null) { maxJump = Math.max(maxJump, Math.abs(y - prev)); }
+    prev = y;
+}
+var stepK2 = P.multiGap * 1 + P.gap; // 290
+var expectPerFrame = stepK2 / P.scrollFrames; // ≈32.2
+assert(maxJump <= expectPerFrame + 1, "单帧位移 ≤ " + expectPerFrame.toFixed(1) + "px（实际最大 " + maxJump.toFixed(1) + "px，平滑无跳变）");
+
+console.log("== 用例 4: 句位置 = ctrl 组中心 + 固定偏移（整组跟随无漂移）==");
+var off1 = lyricY(1, n2, 2, P, 0, FPS, H) - ctrlY(n2, 2, P, 0, FPS, H);
+var off2 = lyricY(2, n2, 2, P, 0, FPS, H) - ctrlY(n2, 2, P, 0, FPS, H);
+var stepV = P.multiGap * 1 + P.gap;
+var expectOff1 = 0.5 * P.multiGap - ((2) / 2) * stepV;  // (mnum-1)/2 = 1 → +0.5mg - step
+var expectOff2 = (1 * stepV - 0.5 * P.multiGap) - ((2) / 2) * stepV; // 句2: gi=1, ii=0 → rel=step-0.5mg
+assert(nearly(off1, expectOff1, 1), "句1 相对 ctrl 固定偏移 = 0.5*mg - step (" + off1.toFixed(1) + ")");
+assert(nearly(off2, expectOff2, 1), "句2 相对 ctrl 固定偏移 = step + 0.5*mg - step (" + off2.toFixed(1) + ")");
+// 滚动全程偏移不变
+var drift = 0;
+for (var fr4 = 0; fr4 < 150; fr4++) {
+    var t4 = fr4 / FPS;
+    drift = Math.max(drift, Math.abs((lyricY(1, n2, 2, P, t4, FPS, H) - ctrlY(n2, 2, P, t4, FPS, H)) - expectOff1));
+}
+assert(drift < 1, "0~5s 全程句1 相对 ctrl 偏移漂移 < 1px（实际 " + drift.toFixed(3) + "px）");
+
+console.log("== 用例 5: 整组缩放一致性（同帧所有句共享组中心距离）==");
+var ok5 = true;
+for (var fr5 = 0; fr5 < 60; fr5++) {
+    var t5 = fr5 / FPS;
+    var cy = ctrlY(n2, 2, P, t5, FPS, H);
+    var d1 = Math.abs(cy - H / 2); // master 在 H/2
+    for (var j = 0; j < n2; j++) {
+        var cyJ = ctrlY(n2, 2, P, t5, FPS, H); // 同帧所有句组中心相同
+        if (Math.abs(cyJ - cy) > 1e-6) { ok5 = false; }
+    }
+}
+assert(ok5, "同帧内所有句共享组中心（整组同缩放同透明度）");
+
+console.log("== 用例 6: 组内行间距生效（mg 145→200）==");
+P.linesPerScroll = 2;
+var d0 = lyricY(1, n2, 2, P, 0, FPS, H) - lyricY(0, n2, 2, P, 0, FPS, H);
+P.multiGap = 200;
+var d1b = lyricY(1, n2, 2, P, 0, FPS, H) - lyricY(0, n2, 2, P, 0, FPS, H);
+assert(nearly(d0, 145) && nearly(d1b, 200), "组内句距 = mg（145→200 生效）");
+
+console.log("\n===== 结果: " + passed + " 通过, " + failed + " 失败 =====");
+process.exit(failed > 0 ? 1 : 0);

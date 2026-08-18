@@ -1,6 +1,12 @@
 # 更新日志（CHANGELOG）
 
-## v2.0.3（当前版本）
+## v2.0.4（当前版本）
+
+- **修复播放错位/跳动**：句位置偏移公式由 `(rel - idx*step)` 修正为 `(rel - ((mnum-1)/2)*step)`（固定偏移），歌词整体位置与滚动动画恢复正常
+- 新增 Node 模拟测试 `test_rolling_lyrics_v2.js`（14 项断言：布局/滚动连续性/整组跟随/缩放一致性/组内间距），表达式算法部署前先在 Node 验证，杜绝盲发
+- 所有表达式显式 `var` 声明
+
+## v2.0.3
 
 - 修复：生成时 buildController 漏传 `linesPerScroll` / `multiGap`，导致「组内行间距」控件 `setValue(undefined)` 报错（第 434 行）
 
