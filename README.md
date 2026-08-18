@@ -18,15 +18,15 @@ ae-tools/
 
 ## 工具总览
 
-### 自写插件（7）
+### 自写插件（8）
 
 | 工具 | 源码位置 | 类型 | AE 菜单 | 状态 | 原独立仓库 |
 |---|---|---|---|---|---|
 | 时间轴缩进 TimeAxisIndent | `panels/TimeAxisIndent/` | 面板 | Window > Extensions | 稳定 | Simiely/TimeAxisIndent |
 | 虚线网格 AE-Dashed-Grid-Generator | `panels/AE-Dashed-Grid-Generator/` | 面板 | Window > Extensions | 稳定 | Simiely/AE-Dashed-Grid-Generator |
 | 水位上升 WaterRisePanel | `panels/AE-Water-Rise-Generator/` | 面板 | Window > Extensions | 稳定 | 本地仓库（无远端，已并入） |
-| 山峰频谱 MountainSpectrum | `panels/MountainSpectrum/` | 面板 | Window > Extensions | 稳定 | 无 git（已并入） |
-| 滚动歌词 Rolling Lyrics | `panels/AE-Rolling-Lyrics/` | 面板 | Window > Extensions | 稳定 | Simiely/AE-Rolling-Lyrics |
+| 滚动歌词 Rolling Lyrics | `panels/AE-Rolling-Lyrics/` | 面板 | Window > Extensions | 稳定（v1 冻结） | Simiely/AE-Rolling-Lyrics |
+| 滚动歌词 V2（新版本） | `panels/AE-Rolling-Lyrics-V2/` | 面板 | Window > Extensions | 新版本 v2.0.0（1/2/3 句一起滚动） | 基于 v1 迭代，v1 冻结不动 |
 | 歌词逐字散落动画 | `panels/AE-Lyrics-Animator/` | 面板 | Window > Extensions | 稳定 | Simiely/AE-Lyrics-Animator |
 | 音频缩放 AudioScale | `panels/AudioScale/` | 面板 | Window > Extensions | 稳定 | Simiely/AudioScale |
 | 星空生成器 starry-sky-generator | `panels/starry-sky-generator/` | 面板 | Window > Extensions | 稳定 | Simiely/starry-sky-generator |
