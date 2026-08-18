@@ -70,6 +70,31 @@ function lyricY(i, n, kk, params, time, f, H) {
     return cy + (rel - ((rt.mnum - 1) / 2) * step);
 }
 
+// 句 i 所属组中心到画面中心的距离（复刻新 d 公式；修正：组中心 = ctrlY + gi*step - (mnum-1)/2*step）
+function groupDist(i, n, kk, params, time, f, H) {
+    var mg = params.multiGap, g = params.gap;
+    var step = mg * (kk - 1) + g;
+    var rt = rhythmTimes(n, kk, params, f);
+    var cy = ctrlY(n, kk, params, time, f, H);
+    var gi = Math.floor(i / kk);
+    return Math.abs(cy + gi * step - ((rt.mnum - 1) / 2) * step - H / 2);
+}
+
+// 句 i 的透明度（复刻 opacity 表达式：ease(min(d,step), 0, step, maxO, norO)）
+function opacityI(i, n, kk, params, time, f, H) {
+    var step = params.multiGap * (kk - 1) + params.gap;
+    var d = groupDist(i, n, kk, params, time, f, H);
+    return ease(Math.min(d, step), 0, step, params.maxOpacity, params.normalOpacity);
+}
+
+// 句 i 的缩放（复刻 scale 表达式）
+function scaleI(i, n, kk, params, time, f, H) {
+    var step = params.multiGap * (kk - 1) + params.gap;
+    var d = groupDist(i, n, kk, params, time, f, H);
+    var ratio = params.maxSize / params.normalSize;
+    return ease(Math.min(d, step), 0, step, ratio * 100, 100);
+}
+
 // ---- 断言工具 ----
 var passed = 0, failed = 0;
 function assert(cond, msg) {
@@ -80,6 +105,7 @@ function nearly(a, b, eps) { return Math.abs(a - b) <= (eps || 0.001); }
 
 // ---- 默认参数（与 DEFAULTS 一致） ----
 var P = { maxSize: 60, normalSize: 40, gap: 145, multiGap: 145, linesPerScroll: 1,
+          maxOpacity: 100, normalOpacity: 30,
           scrollFrames: 9, pauseFrames: 30, pauseRandom: false, jitterFrames: 10 };
 var FPS = 30, H = 1080;
 
@@ -132,18 +158,15 @@ for (var fr4 = 0; fr4 < 150; fr4++) {
 }
 assert(drift < 1, "0~5s 全程句1 相对 ctrl 偏移漂移 < 1px（实际 " + drift.toFixed(3) + "px）");
 
-console.log("== 用例 5: 整组缩放一致性（同帧所有句共享组中心距离）==");
+console.log("== 用例 5: 整组缩放一致性（同帧同组共享 d）==");
+P.linesPerScroll = 2;
 var ok5 = true;
 for (var fr5 = 0; fr5 < 60; fr5++) {
     var t5 = fr5 / FPS;
-    var cy = ctrlY(n2, 2, P, t5, FPS, H);
-    var d1 = Math.abs(cy - H / 2); // master 在 H/2
-    for (var j = 0; j < n2; j++) {
-        var cyJ = ctrlY(n2, 2, P, t5, FPS, H); // 同帧所有句组中心相同
-        if (Math.abs(cyJ - cy) > 1e-6) { ok5 = false; }
-    }
+    if (!nearly(groupDist(0, n2, 2, P, t5, FPS, H), groupDist(1, n2, 2, P, t5, FPS, H), 1e-6)) { ok5 = false; break; }
+    if (!nearly(groupDist(2, n2, 2, P, t5, FPS, H), groupDist(3, n2, 2, P, t5, FPS, H), 1e-6)) { ok5 = false; break; }
 }
-assert(ok5, "同帧内所有句共享组中心（整组同缩放同透明度）");
+assert(ok5, "同组句子共享组中心距离（整组同缩放同透明度）");
 
 console.log("== 用例 6: 组内行间距生效（mg 145→200）==");
 P.linesPerScroll = 2;
@@ -151,6 +174,30 @@ var d0 = lyricY(1, n2, 2, P, 0, FPS, H) - lyricY(0, n2, 2, P, 0, FPS, H);
 P.multiGap = 200;
 var d1b = lyricY(1, n2, 2, P, 0, FPS, H) - lyricY(0, n2, 2, P, 0, FPS, H);
 assert(nearly(d0, 145) && nearly(d1b, 200), "组内句距 = mg（145→200 生效）");
+
+console.log("== 用例 7: 静止时透明度/字号二值（中心 100%/最大，其余普通）==");
+P.linesPerScroll = 2; P.multiGap = 145;
+// time=0：组0 在中心停顿
+assert(nearly(groupDist(0, n2, 2, P, 0, FPS, H), 0, 1e-6), "组0 中心距离 = 0（停顿态）");
+assert(nearly(opacityI(0, n2, 2, P, 0, FPS, H), P.maxOpacity), "中心组透明度 = 最大透明度 (100)");
+assert(nearly(opacityI(1, n2, 2, P, 0, FPS, H), P.maxOpacity), "组0 另一句透明度 = 100（整组一致）");
+assert(nearly(opacityI(2, n2, 2, P, 0, FPS, H), P.normalOpacity), "组1 透明度 = 普通 (30)（二值）");
+assert(nearly(opacityI(4, n2, 2, P, 0, FPS, H), P.normalOpacity), "组2 透明度 = 普通 (30)");
+assert(nearly(scaleI(0, n2, 2, P, 0, FPS, H), P.maxSize / P.normalSize * 100), "中心组缩放 = 最大字号比例");
+assert(nearly(scaleI(2, n2, 2, P, 0, FPS, H), 100), "组1 缩放 = 普通 (100%)");
+
+console.log("== 用例 8: 滚动过程中透明度/字号平滑过渡（非二值跳变）==");
+P.linesPerScroll = 2; P.multiGap = 145;
+// 找滚动中段时刻：先算组0 停顿结束后的滚动中点
+var rt8 = rhythmTimes(n2, 2, P, FPS);
+var jp0 = P.pauseFrames / FPS;
+var scrollMid = rt8.times[0] + jp0 + (P.scrollFrames / FPS) / 2; // 组0→组1 滚动中点
+var op0 = opacityI(0, n2, 2, P, scrollMid, FPS, H);
+var op1 = opacityI(2, n2, 2, P, scrollMid, FPS, H);
+assert(op0 > P.normalOpacity && op0 < P.maxOpacity, "滚动中点旧组透明度为过渡值（" + op0.toFixed(1) + " ∈ (30,100)）");
+assert(nearly(op0, op1, 1), "滚动中点新旧组透明度相等（交叉过渡 " + op1.toFixed(1) + "）");
+var sc0 = scaleI(0, n2, 2, P, scrollMid, FPS, H);
+assert(sc0 > 100 && sc0 < P.maxSize / P.normalSize * 100, "滚动中点字号为过渡值（" + sc0.toFixed(1) + " ∈ (100,150)）");
 
 console.log("\n===== 结果: " + passed + " 通过, " + failed + " 失败 =====");
 process.exit(failed > 0 ? 1 : 0);

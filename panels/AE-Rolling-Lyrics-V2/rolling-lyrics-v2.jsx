@@ -570,15 +570,18 @@
             "var c = thisComp.layer(\"" + CTRL_NAME + "\");",
             "var m = thisComp.layer(\"" + MASTER_NAME + "\").transform.position;",
             rhythm(),
+            "var gi = Math.floor(" + i + "/kk);",
             "var maxS = c.effect(\"最大字号\")(1);",
             "var norS = c.effect(\"普通字号\")(1);",
-            "var maxDist = Math.max(thisComp.height * 0.25, step * 1.5);",
             (cap === null)
                 ? "var ratio = maxS / norS;"
                 : "var ratio = Math.min(maxS / norS, " + cap.toFixed(4) + ");",
-            "var d = Math.abs(c.transform.position[1] - m[1]);",
-            "var dd = Math.min(d, maxDist);",
-            "var s = ease(dd, 0, maxDist, ratio * 100, 100);",
+            // d = 本句所属组的几何中心到画面中心距离（修正：组中心 = ctrlY + gi*step - (mnum-1)/2*step）
+            // 停顿态：中心组 d=0（最大字号），其余组 d>=step（普通字号）→ 二值；
+            // 滚动中：d 在 0..step 间过渡 → 字号平滑变化
+            "var d = Math.abs(c.transform.position[1] + gi*step - ((mnum-1)/2)*step - m[1]);",
+            "var dd = Math.min(d, step);",
+            "var s = ease(dd, 0, step, ratio * 100, 100);",
             "[s, s]"
         ].join("\n");
 
@@ -586,12 +589,12 @@
             "var c = thisComp.layer(\"" + CTRL_NAME + "\");",
             "var m = thisComp.layer(\"" + MASTER_NAME + "\").transform.position;",
             rhythm(),
+            "var gi = Math.floor(" + i + "/kk);",
             "var maxO = c.effect(\"最大透明度\")(1);",
             "var norO = c.effect(\"普通透明度\")(1);",
-            "var maxDist = Math.max(thisComp.height * 0.25, step * 1.5);",
-            "var d = Math.abs(c.transform.position[1] - m[1]);",
-            "var dd = Math.min(d, maxDist);",
-            "ease(dd, 0, maxDist, maxO, norO)"
+            "var d = Math.abs(c.transform.position[1] + gi*step - ((mnum-1)/2)*step - m[1]);",
+            "var dd = Math.min(d, step);",
+            "ease(dd, 0, step, maxO, norO)"
         ].join("\n");
     };
 
