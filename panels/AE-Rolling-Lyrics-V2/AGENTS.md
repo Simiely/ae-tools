@@ -30,9 +30,11 @@
 
 ## 常用命令
 
+- 回归测试：`node test_rolling_lyrics_v2.js`（28 断言，**执行真实表达式字符串**：vm 加载 JSX → mock AE → 逐帧求值；改表达式后必须跑）
 - 语法检查：`cp rolling-lyrics-v2.jsx _c.js && node --check _c.js && rm _c.js`
 - 部署：仓库根 `python install.py`（自动检测 AE 版本 + 补 BOM + 字节校验）
 - 补 BOM：Python 前插 `b'\xef\xbb\xbf'`
+- **控件名改名**：只改 `CN` 常量对象（buildController / 表达式 / 面板显示名全同步）
 
 ## 详细规则（按需 @引用）
 

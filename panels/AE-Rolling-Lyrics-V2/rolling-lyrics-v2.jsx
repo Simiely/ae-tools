@@ -74,6 +74,14 @@
     var MASTER_NAME = "Lyrics_Master"; // 总控制名（整体移动歌词）
     var LYRIC_PREFIX = "歌词_";        // 歌词图层前缀
 
+    // V2：控件名常量（addSliderControl 与表达式 effect() 引用共用，改名只动这一处）
+    var CN = {
+        maxSize: "最大字号", normalSize: "普通字号", gap: "间距",
+        multiGap: "组内行间距", lines: "滚动句数",
+        maxOpacity: "最大透明度", normalOpacity: "普通透明度",
+        scroll: "滚动帧数", pause: "停顿帧数", pauseRandom: "停顿随机", jitter: "抖动帧数"
+    };
+
     var DEFAULTS = {
         maxSize: 60, normalSize: 40, gap: 145,
         maxOpacity: 100, normalOpacity: 30,
@@ -470,17 +478,17 @@
         var m = Math.ceil(n / k);
 
         // 11 个参数控件（效果名中文显示；表达式用 effect("中文名")(1) 引用，中文版 AE 可用）
-        SCRIPTS.core.addSliderControl(ctrl, "最大字号", params.maxSize);
-        SCRIPTS.core.addSliderControl(ctrl, "普通字号", params.normalSize);
-        SCRIPTS.core.addSliderControl(ctrl, "间距", params.gap);
-        SCRIPTS.core.addSliderControl(ctrl, "组内行间距", params.multiGap);   // V2：组内 k 句之间的行距
-        SCRIPTS.core.addSliderControl(ctrl, "滚动句数", k);                    // V2：一次滚动几句
-        SCRIPTS.core.addSliderControl(ctrl, "最大透明度", params.maxOpacity);
-        SCRIPTS.core.addSliderControl(ctrl, "普通透明度", params.normalOpacity);
-        SCRIPTS.core.addSliderControl(ctrl, "滚动帧数", params.scrollFrames);
-        SCRIPTS.core.addSliderControl(ctrl, "停顿帧数", params.pauseFrames);
-        SCRIPTS.core.addCheckboxControl(ctrl, "停顿随机", params.pauseRandom);
-        SCRIPTS.core.addSliderControl(ctrl, "抖动帧数", params.jitterFrames);
+        SCRIPTS.core.addSliderControl(ctrl, CN.maxSize, params.maxSize);
+        SCRIPTS.core.addSliderControl(ctrl, CN.normalSize, params.normalSize);
+        SCRIPTS.core.addSliderControl(ctrl, CN.gap, params.gap);
+        SCRIPTS.core.addSliderControl(ctrl, CN.multiGap, params.multiGap);   // V2：组内 k 句之间的行距
+        SCRIPTS.core.addSliderControl(ctrl, CN.lines, k);                    // V2：一次滚动几句
+        SCRIPTS.core.addSliderControl(ctrl, CN.maxOpacity, params.maxOpacity);
+        SCRIPTS.core.addSliderControl(ctrl, CN.normalOpacity, params.normalOpacity);
+        SCRIPTS.core.addSliderControl(ctrl, CN.scroll, params.scrollFrames);
+        SCRIPTS.core.addSliderControl(ctrl, CN.pause, params.pauseFrames);
+        SCRIPTS.core.addCheckboxControl(ctrl, CN.pauseRandom, params.pauseRandom);
+        SCRIPTS.core.addSliderControl(ctrl, CN.jitter, params.jitterFrames);
 
         // 滚动位置表达式（V2：按「组」滚动；全部显式 var，消除未声明变量污染）。
         // m 组，组步长 step = mg*(k-1) + g（组内 k-1 个组内行间距 + 组间 1 个间距）；
@@ -488,13 +496,13 @@
         var frameDur = comp.frameDuration;
         ctrl.transform.position.expression = [
             "var f = 1/thisComp.frameDuration;",
-            "var sc = effect(\"滚动帧数\")(1);",
-            "var pc = effect(\"停顿帧数\")(1);",
-            "var jitOn = effect(\"停顿随机\")(1);",
-            "var jit = effect(\"抖动帧数\")(1);",
-            "var g = effect(\"间距\")(1);",
-            "var mg = effect(\"组内行间距\")(1);",
-            "var k = Math.max(1, Math.round(effect(\"滚动句数\")(1)));",
+            "var sc = effect(\"" + CN.scroll + "\")(1);",
+            "var pc = effect(\"" + CN.pause + "\")(1);",
+            "var jitOn = effect(\"" + CN.pauseRandom + "\")(1);",
+            "var jit = effect(\"" + CN.jitter + "\")(1);",
+            "var g = effect(\"" + CN.gap + "\")(1);",
+            "var mg = effect(\"" + CN.multiGap + "\")(1);",
+            "var k = Math.max(1, Math.round(effect(\"" + CN.lines + "\")(1)));",
             "var n = " + n + ";",
             "var m = Math.max(1, Math.ceil(n/k));",
             "var step = mg*(k-1) + g;",
@@ -531,16 +539,16 @@
         // 组滚动节奏代码段（控制器与每条表达式共用同一套算法，保证 idx 一致）
         function rhythm() {
             return [
-                "var kk = Math.max(1, Math.round(c.effect(\"滚动句数\")(1)));",
+                "var kk = Math.max(1, Math.round(c.effect(\"" + CN.lines + "\")(1)));",
                 "var nn = " + n + ";",
-                "var mg = c.effect(\"组内行间距\")(1);",
-                "var g = c.effect(\"间距\")(1);",
+                "var mg = c.effect(\"" + CN.multiGap + "\")(1);",
+                "var g = c.effect(\"" + CN.gap + "\")(1);",
                 "var step = mg*(kk-1) + g;",
                 "var f = 1/thisComp.frameDuration;",
-                "var sc = c.effect(\"滚动帧数\")(1);",
-                "var pc = c.effect(\"停顿帧数\")(1);",
-                "var jitOn = c.effect(\"停顿随机\")(1);",
-                "var jit = c.effect(\"抖动帧数\")(1);",
+                "var sc = c.effect(\"" + CN.scroll + "\")(1);",
+                "var pc = c.effect(\"" + CN.pause + "\")(1);",
+                "var jitOn = c.effect(\"" + CN.pauseRandom + "\")(1);",
+                "var jit = c.effect(\"" + CN.jitter + "\")(1);",
                 "var mnum = Math.max(1, Math.ceil(nn/kk));",
                 "var times = [0];",
                 "var t = 0;",
@@ -572,8 +580,8 @@
             "var m = thisComp.layer(\"" + MASTER_NAME + "\").transform.position;",
             rhythm(),
             "var gi = Math.floor(" + i + "/kk);",
-            "var maxS = c.effect(\"最大字号\")(1);",
-            "var norS = c.effect(\"普通字号\")(1);",
+            "var maxS = c.effect(\"" + CN.maxSize + "\")(1);",
+            "var norS = c.effect(\"" + CN.normalSize + "\")(1);",
             (cap === null)
                 ? "var ratio = maxS / norS;"
                 : "var ratio = Math.min(maxS / norS, " + cap.toFixed(4) + ");",
@@ -591,8 +599,8 @@
             "var m = thisComp.layer(\"" + MASTER_NAME + "\").transform.position;",
             rhythm(),
             "var gi = Math.floor(" + i + "/kk);",
-            "var maxO = c.effect(\"最大透明度\")(1);",
-            "var norO = c.effect(\"普通透明度\")(1);",
+            "var maxO = c.effect(\"" + CN.maxOpacity + "\")(1);",
+            "var norO = c.effect(\"" + CN.normalOpacity + "\")(1);",
             "var d = Math.abs(c.transform.position[1] + gi*step - ((mnum-1)/2)*step - m[1]);",
             "var dd = Math.min(d, step);",
             "ease(dd, 0, step, maxO, norO)"
