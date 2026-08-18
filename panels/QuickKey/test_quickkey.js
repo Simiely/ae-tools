@@ -1,7 +1,7 @@
 // QuickKey 回归测试(node 直接运行)
 // 用法: node test_quickkey.js
-// 守护:computeTimes 三种模式 + 非均匀间隔 + 关闭剔除 + 动态节点数(v0.1.4)、
-//       anchorPos 锚点位置规则、parseValue 解析规则
+// 守护:computeTimes(三模式+关闭剔除+动态节点数)、anchorPos、classifyValue、
+//       buildPlan/planHasExplicit(v0.1.14)、propDimCore(v0.1.17 维度定案)
 var QK = require("./QuickKey.jsx");
 var failures = 0;
 
@@ -60,14 +60,65 @@ eq("anchorPos 中间6(偶数偏上)", QK.anchorPos(1, 6), 3);
 eq("anchorPos 中间7", QK.anchorPos(1, 7), 4);
 eq("anchorPos 末尾9", QK.anchorPos(2, 9), 9);
 
-// ---- parseValue ----
-eq("parseValue 空 → null", QK.parseValue(""), null);
-eq("parseValue 纯空格 → null", QK.parseValue("   "), null);
-eq("parseValue 单值", QK.parseValue("100"), 100);
-eq("parseValue 二维", QK.parseValue("960, 540"), [960, 540]);
-eq("parseValue 三维", QK.parseValue("100, 100, 0"), [100, 100, 0]);
-eq("parseValue 非法 → null", QK.parseValue("abc"), null);
-eq("parseValue 尾逗号 → null", QK.parseValue("5,"), null);
+// ---- classifyValue(v0.1.7):cells 数组格子,empty/fixed/bad ----
+eq("1空 全空 → empty", QK.classifyValue(["", "", ""], 1), {kind: "empty"});
+eq("3空 空格 → empty", QK.classifyValue([" ", " ", " "], 3), {kind: "empty"});
+eq("1空 单值", QK.classifyValue(["100", "", ""], 1), {kind: "fixed", value: 100});
+eq("1空 尾格残留(回归 123,,)", QK.classifyValue(["123", "", ""], 1), {kind: "fixed", value: 123});
+eq("1空 非法 → bad", QK.classifyValue(["abc", "", ""], 1), {kind: "bad"});
+eq("1空 框内逗号 → bad", QK.classifyValue(["960, 540", "", ""], 1), {kind: "bad"});
+eq("2空 全填", QK.classifyValue(["960", "540", ""], 2), {kind: "fixed", value: [960, 540]});
+eq("2空 只填1个 → bad", QK.classifyValue(["960", "", ""], 2), {kind: "bad"});
+eq("2空 缺框 → bad", QK.classifyValue(["960"], 2), {kind: "bad"});
+eq("3空 三维", QK.classifyValue(["1", "2", "3"], 3), {kind: "fixed", value: [1, 2, 3]});
+eq("3空 部分 → bad", QK.classifyValue(["1", "2", ""], 3), {kind: "bad"});
 
-console.log(failures === 0 ? "ALL PASS (" + 29 + " assertions)" : failures + " FAILURES");
+// ---- buildPlan / planHasExplicit(v0.1.14 重构:计划生成纯函数) ----
+var VEMPTY = {1: ["", "", ""], 2: ["", "", ""], 3: ["", "", ""], 4: ["", "", ""], 5: ["", "", ""]};
+var pA = QK.buildPlan(0, 5, g5, ALL, VEMPTY, 1);
+eq("buildPlan 起始帧全空", pA, [
+    {slot: 1, isAnchor: true,  closed: false, offset: 0,  kind: "empty", value: null, raw: ""},
+    {slot: 2, isAnchor: false, closed: false, offset: 5,  kind: "empty", value: null, raw: ""},
+    {slot: 3, isAnchor: false, closed: false, offset: 10, kind: "empty", value: null, raw: ""},
+    {slot: 4, isAnchor: false, closed: false, offset: 15, kind: "empty", value: null, raw: ""},
+    {slot: 5, isAnchor: false, closed: false, offset: 20, kind: "empty", value: null, raw: ""}
+]);
+eq("planHasExplicit 全空=false", QK.planHasExplicit(pA), false);
+var VB = {1: ["", "", ""], 2: ["100", "", ""], 3: ["", "", ""], 4: ["", "", ""], 5: ["", "", ""]};
+var pB = QK.buildPlan(1, 5, g5, ALL, VB, 1);
+eq("buildPlan 中间帧含显式值", pB, [
+    {slot: 1, isAnchor: false, closed: false, offset: -10, kind: "empty", value: null, raw: ""},
+    {slot: 2, isAnchor: false, closed: false, offset: -5,  kind: "fixed", value: 100, raw: "100"},
+    {slot: 3, isAnchor: true,  closed: false, offset: 0,   kind: "empty", value: null, raw: ""},
+    {slot: 4, isAnchor: false, closed: false, offset: 5,   kind: "empty", value: null, raw: ""},
+    {slot: 5, isAnchor: false, closed: false, offset: 10,  kind: "empty", value: null, raw: ""}
+]);
+eq("planHasExplicit 有显式=true", QK.planHasExplicit(pB), true);
+var VC = {1: ["50", "", ""], 2: ["", "", ""], 3: ["", "", ""], 4: ["", "", ""], 5: ["", "", ""]};
+var off2 = {1: true, 2: false, 3: true, 4: true, 5: true};
+var pC = QK.buildPlan(0, 5, g5, off2, VC, 1);
+eq("buildPlan 关闭节点剔除", pC, [
+    {slot: 1, isAnchor: true,  closed: false, offset: 0,  kind: "fixed", value: 50, raw: "50"},
+    {slot: 2, isAnchor: false, closed: true,  offset: null, kind: null, value: null, raw: ""},
+    {slot: 3, isAnchor: false, closed: false, offset: 5,  kind: "empty", value: null, raw: ""},
+    {slot: 4, isAnchor: false, closed: false, offset: 10, kind: "empty", value: null, raw: ""},
+    {slot: 5, isAnchor: false, closed: false, offset: 15, kind: "empty", value: null, raw: ""}
+]);
+eq("planHasExplicit 关闭但有显式=true", QK.planHasExplicit(pC), true);
+
+// ---- propDimCore(v0.1.17 维度定案):AE 2026 实测枚举 6413~6417 ----
+eq("2D图层 位置(6413)→2", QK.propDimCore("ADBE Position", 6413, false), 2);
+eq("3D图层 位置(6413)→3", QK.propDimCore("ADBE Position", 6413, true), 3);
+eq("2D图层 缩放(6414)→2", QK.propDimCore("ADBE Scale", 6414, false), 2);
+eq("2D图层 锚点(6413)→2", QK.propDimCore("ADBE Anchor Point", 6413, false), 2);
+eq("不透明度(6417)→1 恒1维", QK.propDimCore("ADBE Opacity", 6417, false), 1);
+eq("旋转Z(6417)→1 即使3D图层", QK.propDimCore("ADBE Rotate Z", 6417, true), 1);
+eq("找不到图层 位置→退回类型3", QK.propDimCore("ADBE Position", 6413, null), 3);
+eq("非变换2D点(6415)→2", QK.propDimCore("My Effect Point", 6415, false), 2);
+eq("非变换3D点(6413)→3", QK.propDimCore("My Effect Point", 6413, false), 3);
+// ---- v0.1.18:分离尺寸跟随者恒 1 维 ----
+eq("分离位置X(6413,isSep)→1", QK.propDimCore("ADBE Position", 6413, false, true), 1);
+eq("分离缩放X(6414,isSep)→1", QK.propDimCore("ADBE Scale", 6414, false, true), 1);
+
+console.log(failures === 0 ? "ALL PASS (" + 50 + " assertions)" : failures + " FAILURES");
 process.exit(failures === 0 ? 0 : 1);
