@@ -1,6 +1,11 @@
 # 更新日志（CHANGELOG）
 
-## v1.0.2（当前版本）
+## v1.0.3（当前版本）
+
+- **Rolling Lyrics V2 真机验证通过**（2026-08-18）：滚动句数数字输入（任意 ≥1）+ 组内行间距 + 二值透明度全部正常，正式转「稳定」
+- V2 工程化加固（v2.0.4~v2.0.7）：修复错位跳动、二值透明度、控件名常量集中、测试升级为真实表达式执行（28 断言）
+
+## v1.0.2
 
 - 新增 **Rolling Lyrics V2**（`panels/AE-Rolling-Lyrics-V2/`）：滚动句数 1/2/3 句一起滚动 + 组内行间距；v1（`panels/AE-Rolling-Lyrics/`）冻结不动
 - README 自写插件表补 V2 行；修正 MountainSpectrum 残留行
