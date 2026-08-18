@@ -75,12 +75,12 @@
     var LYRIC_PREFIX = "歌词_";        // 歌词图层前缀
 
     var DEFAULTS = {
-        maxSize: 120, normalSize: 60, gap: 140,
-        maxOpacity: 100, normalOpacity: 60,
+        maxSize: 60, normalSize: 40, gap: 145,
+        maxOpacity: 100, normalOpacity: 30,
         scrollFrames: 30, pauseFrames: 20,
         pauseRandom: false, jitterFrames: 10,
         fitLong: true,
-        linesPerScroll: 1, multiGap: 140   // V2：一次滚动句数（1/2/3）+ 组内行间距 (px)
+        linesPerScroll: 1, multiGap: 145   // V2：一次滚动句数（1/2/3）+ 组内行间距 (px)
     };
 
     // ---- 预设常量（对齐 AE-Lyrics-Animator 双层持久化方案） ----
