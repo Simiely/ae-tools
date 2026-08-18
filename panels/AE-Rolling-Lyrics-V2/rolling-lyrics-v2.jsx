@@ -80,7 +80,7 @@
         scrollFrames: 9, pauseFrames: 30,
         pauseRandom: false, jitterFrames: 10,
         fitLong: true,
-        linesPerScroll: 1, multiGap: 145   // V2：一次滚动句数（1/2/3）+ 组内行间距 (px)
+        linesPerScroll: 1, multiGap: 145   // V2：一次滚动句数（任意 ≥1）+ 组内行间距 (px)
     };
 
     // ---- 预设常量（对齐 AE-Lyrics-Animator 双层持久化方案） ----
@@ -210,7 +210,7 @@
             pauseRandom: (ui.pauseRandomChk) ? !!ui.pauseRandomChk.value : DEFAULTS.pauseRandom,
             jitterFrames: (ui.eJitter) ? SCRIPTS.util.numVal(ui.eJitter.text, DEFAULTS.jitterFrames) : DEFAULTS.jitterFrames,
             fitLong: ui.fitChk.value,
-            linesPerScroll: (ui.linesDD) ? Math.min(3, Math.max(1, ui.linesDD.selection.index + 1)) : DEFAULTS.linesPerScroll,
+            linesPerScroll: (ui.eLines) ? Math.max(1, Math.round(parseFloat(ui.eLines.text) || DEFAULTS.linesPerScroll)) : DEFAULTS.linesPerScroll,
             multiGap: (ui.eMultiGap) ? SCRIPTS.util.numVal(ui.eMultiGap.text, DEFAULTS.multiGap) : DEFAULTS.multiGap
         };
     };
@@ -242,7 +242,7 @@
             pauseRandom: (p.pr !== undefined) ? !!p.pr : DEFAULTS.pauseRandom,
             jitterFrames: SCRIPTS.util.numVal(p.jit, DEFAULTS.jitterFrames),
             fitLong: (p.fit !== undefined) ? !!p.fit : DEFAULTS.fitLong,
-            linesPerScroll: (p.lps !== undefined) ? Math.min(3, Math.max(1, Math.round(p.lps))) : DEFAULTS.linesPerScroll,
+            linesPerScroll: (p.lps !== undefined) ? Math.max(1, Math.round(p.lps)) : DEFAULTS.linesPerScroll,
             multiGap: SCRIPTS.util.numVal(p.mg, DEFAULTS.multiGap)
         };
     };
@@ -260,7 +260,7 @@
         if (ui.pauseRandomChk) { ui.pauseRandomChk.value = params.pauseRandom; }
         if (ui.eJitter) { ui.eJitter.text = String(params.jitterFrames); }
         ui.fitChk.value = params.fitLong;
-        if (ui.linesDD) { ui.linesDD.selection = Math.min(2, Math.max(0, params.linesPerScroll - 1)); }
+        if (ui.eLines) { ui.eLines.text = String(params.linesPerScroll); }
         if (ui.eMultiGap) { ui.eMultiGap.text = String(params.multiGap); }
     };
 
@@ -465,8 +465,8 @@
         master.startTime = 0;
         master.transform.position.setValue([comp.width / 2, comp.height / 2]);
 
-        // V2：组大小 k（一次滚动几句）与组数 m
-        var k = Math.min(3, Math.max(1, Math.round(params.linesPerScroll || 1)));
+        // V2：组大小 k（一次滚动几句，任意 ≥1）与组数 m
+        var k = Math.max(1, Math.round(params.linesPerScroll || 1));
         var m = Math.ceil(n / k);
 
         // 11 个参数控件（效果名中文显示；表达式用 effect("中文名")(1) 引用，中文版 AE 可用）
@@ -561,7 +561,8 @@
             rhythm(),
             "var gi = Math.floor(" + i + "/kk);",
             "var ii = " + i + " - gi*kk;",
-            "var rel = gi*step + (ii - (kk-1)/2)*mg;",
+            "var kkAct = Math.min(kk, nn - gi*kk);",   // 本组实际句数（最后一组可能不满）
+            "var rel = gi*step + (ii - (kkAct-1)/2)*mg;",
             "var y = c.transform.position[1] + (rel - ((mnum-1)/2)*step);",
             "[" + centerX + " + (m[0] - " + centerX + "), y + (m[1] - " + centerY + ")]"
         ].join("\n");
@@ -623,8 +624,8 @@
         var jitterFrames = Math.max(0, Math.round(params.jitterFrames || 0));
         if (scrollFrames < 1) { scrollFrames = 1; }
         if (pauseFrames < 0) { pauseFrames = 0; }
-        // V2：一次滚动几句（组大小）+ 组内行间距
-        var linesPerScroll = Math.min(3, Math.max(1, Math.round(params.linesPerScroll || 1)));
+        // V2：一次滚动几句（组大小，任意 ≥1）+ 组内行间距
+        var linesPerScroll = Math.max(1, Math.round(params.linesPerScroll || 1));
         var multiGap = SCRIPTS.util.numVal(params.multiGap, DEFAULTS.multiGap);
 
         var offsets = SCRIPTS.core.computeOffsets(n, gap);
@@ -892,17 +893,8 @@
         var eMax = paramRow("最大文字大小 (px):", DEFAULTS.maxSize);
         var eNormal = paramRow("普通文字大小 (px):", DEFAULTS.normalSize);
         var eGap = paramRow("两句歌词间距 (px):", DEFAULTS.gap);
-        // V2：滚动句数（一次滚动几句）+ 组内行间距
-        var linesRow = pal.add("group");
-        linesRow.orientation = "row";
-        linesRow.alignChildren = "center";
-        linesRow.spacing = 8;
-        var linesLb = linesRow.add("statictext", undefined, "滚动句数 (一次滚动几句):");
-        linesLb.preferredSize.width = 180;
-        linesLb.alignment = ["left", "center"];
-        var linesDD = linesRow.add("dropdownlist", undefined, ["1 句", "2 句", "3 句"]);
-        linesDD.selection = DEFAULTS.linesPerScroll - 1;
-        linesDD.alignment = ["fill", "center"];
+        // V2：滚动句数（一次滚动几句，可填任意 ≥1 的数字）+ 组内行间距
+        var eLines = paramRow("滚动句数 (一次滚动几句):", DEFAULTS.linesPerScroll);
         var eMultiGap = paramRow("组内行间距 (px):", DEFAULTS.multiGap);
         var eMaxOp = paramRow("最大文字透明度 (%):", DEFAULTS.maxOpacity);
         var eNormalOp = paramRow("普通文字透明度 (%):", DEFAULTS.normalOpacity);
@@ -981,7 +973,7 @@
         UI = {
             pal: pal, btn: btn, eLyrics: eLyrics,
             eMax: eMax, eNormal: eNormal, eGap: eGap,
-            linesDD: linesDD, eMultiGap: eMultiGap,
+            eLines: eLines, eMultiGap: eMultiGap,
             eMaxOp: eMaxOp, eNormalOp: eNormalOp,
             eScroll: eScroll, ePause: ePause,
             pauseRandomChk: pauseRandomChk, eJitter: eJitter,

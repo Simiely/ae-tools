@@ -66,7 +66,8 @@ function lyricY(i, n, kk, params, time, f, H) {
     var rt = rhythmTimes(n, kk, params, f);
     var cy = ctrlY(n, kk, params, time, f, H); // 动态组中心（含滚动插值）
     var gi = Math.floor(i / kk), ii = i - gi * kk;
-    var rel = gi * step + (ii - (kk - 1) / 2) * mg;
+    var kkAct = Math.min(kk, n - gi * kk);      // 本组实际句数（最后一组可能不满）
+    var rel = gi * step + (ii - (kkAct - 1) / 2) * mg;
     return cy + (rel - ((rt.mnum - 1) / 2) * step);
 }
 
@@ -198,6 +199,22 @@ assert(op0 > P.normalOpacity && op0 < P.maxOpacity, "滚动中点旧组透明度
 assert(nearly(op0, op1, 1), "滚动中点新旧组透明度相等（交叉过渡 " + op1.toFixed(1) + "）");
 var sc0 = scaleI(0, n2, 2, P, scrollMid, FPS, H);
 assert(sc0 > 100 && sc0 < P.maxSize / P.normalSize * 100, "滚动中点字号为过渡值（" + sc0.toFixed(1) + " ∈ (100,150)）");
+
+console.log("== 用例 9: 任意句数（k=4, n=9；k=10 > n，不限制 1-3）==");
+P.linesPerScroll = 4; P.multiGap = 145;
+var n9 = 9, k9 = 4;
+var ys9 = [];
+for (var j9 = 0; j9 < n9; j9++) { ys9.push(lyricY(j9, n9, k9, P, 0, FPS, H)); }
+assert(nearly((ys9[0] + ys9[3]) / 2, H / 2), "组0 中心 = 画面中心（k=4 对称）");
+assert(nearly(ys9[1] - ys9[0], P.multiGap), "组内句距 = mg");
+assert(nearly(ys9[4] - ys9[3], P.gap), "组间相邻句距 = gap");
+assert(nearly(opacityI(0, n9, k9, P, 0, FPS, H), P.maxOpacity), "k=4 中心组透明度 = 100");
+assert(nearly(opacityI(4, n9, k9, P, 0, FPS, H), P.normalOpacity), "k=4 相邻组透明度 = 30");
+P.linesPerScroll = 10; // k > 句数：只有一组，全部居中 100%
+var ys10 = [];
+for (var j10 = 0; j10 < 5; j10++) { ys10.push(lyricY(j10, 5, 10, P, 0, FPS, H)); }
+assert(nearly((ys10[0] + ys10[4]) / 2, H / 2), "k=10 > n=5：整组对称居中");
+assert(nearly(opacityI(2, 5, 10, P, 0, FPS, H), P.maxOpacity), "k≥n 时全部句 100% 透明度");
 
 console.log("\n===== 结果: " + passed + " 通过, " + failed + " 失败 =====");
 process.exit(failed > 0 ? 1 : 0);
