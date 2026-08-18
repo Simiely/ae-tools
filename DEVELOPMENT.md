@@ -60,5 +60,5 @@ ae-tools/
 
 ## 四、文档基线（断点续传）
 
-- 2026-08-18（commit `________`）：四件套建立（README/AGENTS/DEVELOPMENT/CHANGELOG）+ 自写/收集目录分离
+- 2026-08-18（commit `4fa9fa2`）：四件套建立（README/AGENTS/DEVELOPMENT/CHANGELOG）+ 自写/收集目录分离
 - 维护流程：① CHANGELOG 追加版本 → ② AGENTS 基线行更新 → ③ knowledge-base/仓库盘点表.md 回填（**由用户执行**，本仓库维护者不得改动 knowledge-base）→ ④ 推送
