@@ -1,6 +1,10 @@
 # 更新日志（CHANGELOG）
 
-## v2.0.2（当前版本）
+## v2.0.3（当前版本）
+
+- 修复：生成时 buildController 漏传 `linesPerScroll` / `multiGap`，导致「组内行间距」控件 `setValue(undefined)` 报错（第 434 行）
+
+## v2.0.2
 
 - 滚动帧数默认 30 → **9**；停顿帧数默认 20 → **30**
 

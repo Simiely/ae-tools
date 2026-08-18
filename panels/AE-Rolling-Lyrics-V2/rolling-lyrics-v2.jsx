@@ -670,7 +670,8 @@
             maxSize: maxSize, normalSize: normalSize, gap: gap,
             maxOpacity: maxOpacity, normalOpacity: normalOpacity,
             scrollFrames: scrollFrames, pauseFrames: pauseFrames,
-            pauseRandom: pauseRandom, jitterFrames: jitterFrames
+            pauseRandom: pauseRandom, jitterFrames: jitterFrames,
+            linesPerScroll: linesPerScroll, multiGap: multiGap   // V2：修复漏传导致 setValue(undefined)
         });
 
         // 合成时长：只延长不截断（合成里已有更长的内容如背景音乐时保持原时长）
