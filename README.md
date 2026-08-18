@@ -18,7 +18,7 @@ ae-tools/
 
 ## 工具总览
 
-### 自写插件（8）
+### 自写插件（9）
 
 | 工具 | 源码位置 | 类型 | AE 菜单 | 状态 | 原独立仓库 |
 |---|---|---|---|---|---|
@@ -30,6 +30,7 @@ ae-tools/
 | 歌词逐字散落动画 | `panels/AE-Lyrics-Animator/` | 面板 | Window > Extensions | 稳定 | Simiely/AE-Lyrics-Animator |
 | 音频缩放 AudioScale | `panels/AudioScale/` | 面板 | Window > Extensions | 稳定 | Simiely/AudioScale |
 | 星空生成器 starry-sky-generator | `panels/starry-sky-generator/` | 面板 | Window > Extensions | 稳定 | Simiely/starry-sky-generator |
+| 快速K帧 QuickKey | `panels/QuickKey/` | 面板 | Window > Extensions | 开发中（v0.1.4，待真机验证） | 新插件（本仓库首发） |
 
 ### 待开发（WIP，暂不部署）
 
