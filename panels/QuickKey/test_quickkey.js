@@ -189,6 +189,14 @@ eq("valDiff 数组最大维差", QK.valDiff([100, 100], [50, 80]), 50);
 eq("valDiff 同值 → 0", QK.valDiff([50, 50], [50, 50]), 0);
 eq("valDiff 类型不匹配 → 0", QK.valDiff(100, [50, 80]), 0);
 
+// ---- valSignedDiff(v0.3.7 带符号值差,曲线减少方向修复;语义 = a 相对 b 的差) ----
+eq("valSignedDiff 数字 增加", QK.valSignedDiff(100, 40), 60);
+eq("valSignedDiff 数字 减少", QK.valSignedDiff(40, 100), -60);
+eq("valSignedDiff 数组 单轴减少", QK.valSignedDiff([460, 540], [960, 540]), -500);
+eq("valSignedDiff 数组 增加取最大分量", QK.valSignedDiff([200, 300], [100, 100]), 200);
+eq("valSignedDiff 数组 同值 → 0", QK.valSignedDiff([50, 50], [50, 50]), 0);
+eq("valSignedDiff 类型不匹配 → 0", QK.valSignedDiff(100, [50, 80]), 0);
+
 // ---- 迷你 JSON(v0.2.1):stringifyPresets / parsePresetsText / extractPresetsFallback ----
 var PEX = [
     {name: "线性", x1: 0, y1: 0, x2: 1, y2: 1},
@@ -292,6 +300,21 @@ var r5 = QK.applySegCurves(mp5, [{t: 0, v: 0, idx: 0}, {t: 1, v: 100, idx: 2}], 
 eq("applySegCurves idx=0 → missed", (r5.applied === 1 && r5.missed === 1), true);
 eq("applySegCurves idx=0 → missIdx 计数", r5.missIdx, 1);
 
+// v0.3.7:减少方向端到端——值 200→100→0、时差 1s → avg=−100,速度必须带负号
+// (KeyframeEase.speed 官方浮点无正负限制,AE 值减少时速度本为负)
+var F3DEC = [{t: 0, v: 200, idx: 1}, {t: 1, v: 100, idx: 2}, {t: 2, v: 0, idx: 3}];
+var mpDec = mockProp();
+var rDec = QK.applySegCurves(mpDec, F3DEC, [
+    {x1: 0.42, y1: 0, x2: 1, y2: 1},   // 缓入 ×2
+    {x1: 0.42, y1: 0, x2: 1, y2: 1}
+]);
+eq("减少方向 缓入 applied=3", rDec.applied, 3);
+eq("减少方向 缓入 ease(速度带负号)", mpDec.log.ease, [
+    {idx: 1, eiLen: 1, eiInf: 0.1, eiSpd: 0, eoLen: 1, eoInf: 42, eoSpd: 0},     // 帧1:出影响 42、速度 y1×avg/x1=−0
+    {idx: 2, eiLen: 1, eiInf: 0.1, eiSpd: -100, eoLen: 1, eoInf: 42, eoSpd: 0},  // 帧2:入退 avg=−100、出影响 42
+    {idx: 3, eiLen: 1, eiInf: 0.1, eiSpd: -100, eoLen: 1, eoInf: 0.1, eoSpd: 0} // 帧3:入退 avg=−100
+]);
+
 // v0.2.10:missed 细分——调用异常(mock setTemporalEaseAtKey 抛错)
 var mp6 = mockProp(true);
 var r6 = QK.applySegCurves(mp6, F3, [
@@ -350,6 +373,19 @@ eq("bezierToEase 缓出", QK.bezierToEase(0, 0, 0.58, 1, 100), {
     out: {speed: 100, influence: 0.1},
     inE: {speed: 0, influence: 42}
 });
+// ---- 减少方向(v0.3.7 修复:avg 带符号,速度方向 = 真实运动方向) ----
+// 缓入(avg=−100):出侧 y1=0 → −0;入侧 x2=1 除零退 avg=−100、影响钳 0.1
+eq("bezierToEase 缓入 减少方向", QK.bezierToEase(0.42, 0, 1, 1, -100), {
+    out: {speed: 0, influence: 42},
+    inE: {speed: -100, influence: 0.1}
+});
+// 缓出(avg=−100):出侧 x1=0 退 avg=−100、影响钳 0.1;入侧 y2=1 → −0
+eq("bezierToEase 缓出 减少方向", QK.bezierToEase(0, 0, 0.58, 1, -100), {
+    out: {speed: -100, influence: 0.1},
+    inE: {speed: 0, influence: 42}
+});
+// 线性 减少方向仍 → null(线性端点匀速由调用方用 avg 直接构造)
+eq("bezierToEase 线性 减少方向 → null", QK.bezierToEase(0, 0, 1, 1, -100), null);
 
 // ---- applySegCurves 端点平滑(v0.2.15,smoothEnd 参数) ----
 // 全线性 + 平滑:帧1/帧3 转 BEZIER 端点速度 0(圆润),帧2 保持 LINEAR 跳过
@@ -500,5 +536,5 @@ eq("extractParamsFromBlock 空块 → null", QK.extractParamsFromBlock(""), null
 var slotsTxt = '{"slots":[{"mode":0},{"mode":1},{},{}]}';
 eq("extractSlotsFallback 顺序+空槽", JSON.stringify(QK.extractSlotsFallback(slotsTxt)), JSON.stringify([{mode: 0}, {mode: 1}, {}, {}]));
 
-console.log(failures === 0 ? "ALL PASS (" + 135 + " assertions)" : failures + " FAILURES");
+console.log(failures === 0 ? "ALL PASS (" + 155 + " assertions)" : failures + " FAILURES");
 process.exit(failures === 0 ? 0 : 1);

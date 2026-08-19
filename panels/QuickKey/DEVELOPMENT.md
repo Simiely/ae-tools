@@ -2,6 +2,52 @@
 
 > 一坑一篇,按时间倒序。只记录"代码里看不出的信息"。
 
+## v0.3.7(2026-08-19)— 曲线在数值"减少"时方向反:avg 必须带符号
+
+### 起因
+
+真机:曲线功能对"值增加"(0→100)正常,值减少(不透明度 100→0、位置 960→460)时
+缓动方向错乱,像"反向缓动"。
+
+### 根因(官方文档定案)
+
+`applySegCurves` 算段平均速度用的是 `valDiff`,而 `valDiff` 返回**绝对值**
+(`Math.abs(a-b)`、数组取最大分量差)→ `avg` 恒 ≥ 0 → `bezierToEase` 的速度
+`y1×avg/x1`、`(1−y2)×avg/(1−x2)` 恒正。
+
+但 AE 的速度语义是**带符号**的,三处可信源一致:
+- Adobe 官方 `KeyframeEase.speed`:"A floating-point value",无正负限制,可读写
+- AE Keyframe Velocity 面板:值从高到低时显示**负速度**
+  (社区教学确认:"going from a higher number to a lower number, it's interpreting
+  that as a negative velocity. The curve is the exact same shape, it's just inverted.")
+- AE 表达式 `velocity` 官方文档:"根据运动方向会出现负值的速度"
+
+值 100→0 时真实速度应为 −100,代码给了 +100 → 方向反,曲线形状错乱。
+线性段端点匀速(v0.2.14 的 `linSpd = avg`)在混合/平滑场景同样受影响。
+
+### 修复
+
+新增纯函数 **`valSignedDiff(a, b)`**(与 `valDiff` 语义对称):
+- 数字 → `a - b`(带符号)
+- 数组 → 取"最大绝对差分量"的带符号差(`[960,540]→[460,540]` 得 −500)
+- 其他 → 0
+
+`applySegCurves` 的 `avg` 改用 `valSignedDiff`,符号自然贯穿到 `bezierToEase`
+(本体零改动)与线性端点 `linSpd`。influence 与方向无关不动;端点平滑不受影响。
+0→100 得 +100(现行为不变,不回归);100→0 得 −100(修复)。
+
+### 验证
+
+- 测试 135 → **155 断言**:`valSignedDiff` 6 条(数字增/减、数组单轴减、数组增取最大分量、
+  同值、类型不匹配)+ `bezierToEase` 负 avg 3 条(缓入/缓出/线性)+ `applySegCurves`
+  减少方向端到端 3 条(值 200→100→0,断言 `eiSpd=-100` 贯穿)
+- 全部通过;`node --check` 语法 ✓;BOM ✓
+
+### 注意
+
+多维属性混合方向(如 x 增 y 减)时,单标量 `avg` 只能取"最大绝对差分量"的方向,
+是现有架构的固有近似(单轴变化完全正确)。若以后要逐维缓动需重做曲线模型,暂不做。
+
 ## v0.3.5(2026-08-19)— 全参数预设管理:4 槽位 + 双层持久化 + 导出导入
 
 ### 方案来源

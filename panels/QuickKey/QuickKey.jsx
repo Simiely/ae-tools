@@ -7,10 +7,10 @@
 // 曲线功能为每段套 cubic-bezier 缓动;预设可导出/导入 JSON。
 //
 // 代码地图(用函数名定位,行号会随编辑漂移):
-//   纯逻辑层(node 可测,test_quickkey.js 135 断言):
+//   纯逻辑层(node 可测,test_quickkey.js 155 断言):
 //     排程: anchorPos / computeTimes / classifyValue / buildPlan / planHasExplicit
 //     曲线: matchPreset / curveSegments / mergePresets / validatePresets /
-//            isLinearPreset / bezierToEase / valDiff
+//            isLinearPreset / bezierToEase / valDiff / valSignedDiff(v0.3.7)
 //     迷你 JSON(ES3 自包含,勿依赖全局 JSON): stringifyPresets /
 //            parsePresetsText / extractPresetsFallback
 //     全参数预设(v0.3.5): collectParams / applyParamsToState / decodeOn·
@@ -333,6 +333,28 @@
                 if (d > mx) { mx = d; }
             }
             return mx;
+        }
+        return 0;
+    }
+
+    // 带符号的值差(v0.3.7,修复值减少时曲线方向反):
+    //   valDiff 返回绝对值 → avg 恒 ≥ 0 → bezierToEase 速度恒正;
+    //   AE 的 KeyframeEase.speed 是带符号浮点(官方文档无正负限制,
+    //   Keyframe Velocity 面板值减少时显示负速度,官方表达式 velocity
+    //   也按运动方向返回负值)——值 100→0 时真实速度应为 -100。
+    //   数字 → a - b(带符号);数组 → 取"最大绝对差分量"的带符号差
+    //   (与 valDiff 的"最大分量差"语义对称,单轴变化完全正确);其他 → 0
+    function valSignedDiff(a, b) {
+        if (typeof a === "number" && typeof b === "number") { return a - b; }
+        if (a instanceof Array && b instanceof Array && a.length === b.length) {
+            var mxAbs = 0;
+            var sign = 0;
+            for (var i = 0; i < a.length; i++) {
+                var d = a[i] - b[i];
+                var ad = Math.abs(d);
+                if (ad > mxAbs) { mxAbs = ad; sign = d; }
+            }
+            return sign;
         }
         return 0;
     }
@@ -974,7 +996,7 @@
         for (j = 1; j < m; j++) {
             var sg = segs[j - 1];
             var dt = frames[j].t - frames[j - 1].t;
-            var avg = (dt > 0.000001) ? valDiff(frames[j].v, frames[j - 1].v) / dt : 0;
+            var avg = (dt > 0.000001) ? valSignedDiff(frames[j].v, frames[j - 1].v) / dt : 0;
             var conv = sg ? bezierToEase(sg.x1, sg.y1, sg.x2, sg.y2, avg) : null;
             var isFirstSeg = (j === 1);
             var isLastSeg = (j === m - 1);
@@ -2041,6 +2063,7 @@
             isLinearPreset: isLinearPreset,
             bezierToEase: bezierToEase,   // v0.2.12:bezier→AE 缓动转换(纯函数)
             valDiff: valDiff,
+            valSignedDiff: valSignedDiff,   // v0.3.7:带符号值差(曲线减少方向修复)
             setKeyAt: setKeyAt,   // v0.2.11:打帧即得索引(addKey),导出供 mock 核验
             applySegCurves: applySegCurves,   // v0.2.4:导出供 node mock 核验调用序列
             stringifyPresets: stringifyPresets,
