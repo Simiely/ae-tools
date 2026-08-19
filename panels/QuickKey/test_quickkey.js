@@ -211,13 +211,13 @@ eq("parsePresetsText 垃圾 → null", QK.parsePresetsText("???not json???"), nu
 // ---- applySegCurves 调用序列核验(v0.2.4/0.2.6,mock prop 记录调用) ----
 // v0.2.6:mock 也校验 setTemporalEaseAtKey 的【数组参数】(官方 API 要求
 // 1D/2D/3D 属性分别传 1/2/3 个 KeyframeEase——之前传单个对象是真机不生效的根因)
-function mockProp(failEase) {
+function mockProp(failEase, mn) {
     var log = {interp: [], ease: [], key: []};
     var keys = [];   // 模拟关键帧 [{time, value}]
     return {
         log: log,
         propertyValueType: 6417,          // OneD(1 维,旋转)
-        matchName: "ADBE Rotate Z",
+        matchName: mn || "ADBE Rotate Z",
         value: 0,
         numKeys: 0,
         keyframeTime: function (k) { return keys[k - 1].time; },
@@ -351,5 +351,88 @@ eq("bezierToEase 缓出", QK.bezierToEase(0, 0, 0.58, 1, 100), {
     inE: {speed: 0, influence: 42}
 });
 
-console.log(failures === 0 ? "ALL PASS (" + 105 + " assertions)" : failures + " FAILURES");
+// ---- applySegCurves 端点平滑(v0.2.15,smoothEnd 参数) ----
+// 全线性 + 平滑:帧1/帧3 转 BEZIER 端点速度 0(圆润),帧2 保持 LINEAR 跳过
+var mp7 = mockProp();
+var r7 = QK.applySegCurves(mp7, F3, [
+    {x1: 0, y1: 0, x2: 1, y2: 1},
+    {x1: 0, y1: 0, x2: 1, y2: 1}
+], true);
+eq("平滑 全线性 applied=2(端点帧)", r7.applied, 2);
+eq("平滑 全线性 插值只 1/3(帧2 跳过)", mp7.log.interp, [1, 3]);
+eq("平滑 全线性 ease(端点速度 0)", mp7.log.ease, [
+    {idx: 1, eiLen: 1, eiInf: 0.1, eiSpd: 0, eoLen: 1, eoInf: 0.1, eoSpd: 0},
+    {idx: 3, eiLen: 1, eiInf: 0.1, eiSpd: 0, eoLen: 1, eoInf: 0.1, eoSpd: 0}
+]);
+// 全缓入缓出 + 平滑:端点速度本就 0(缓入缓出 y1=0/y2=1),行为与硬模式一致
+var mp8 = mockProp();
+var r8 = QK.applySegCurves(mp8, F3, [
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1},
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1}
+], true);
+eq("平滑 全缓入缓出 applied=3(与硬一致)", r8.applied, 3);
+eq("平滑 全缓入缓出 ease 同硬模式", mp8.log.ease, [
+    {idx: 1, eiLen: 1, eiInf: 0.1, eiSpd: 0, eoLen: 1, eoInf: 42, eoSpd: 0},
+    {idx: 2, eiLen: 1, eiInf: 42, eiSpd: 0, eoLen: 1, eoInf: 42, eoSpd: 0},
+    {idx: 3, eiLen: 1, eiInf: 42, eiSpd: 0, eoLen: 1, eoInf: 0.1, eoSpd: 0}
+]);
+
+// ---- 缓动数组维度(v0.2.16):SPATIAL(锚点/位置)=1、缩放按值维度 ----
+// 锚点(2D_SPATIAL):easeArr 必须 1 个元素——修复「值数组没有 1 元素」真机 bug
+var mp9 = mockProp(false, "ADBE Anchor Point");
+var r9 = QK.applySegCurves(mp9, [
+    {t: 0, v: [0, 100], idx: 1},
+    {t: 1, v: [300, 100], idx: 2},
+    {t: 2, v: [600, 100], idx: 3}
+], [
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1},
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1}
+]);
+eq("锚点 缓动数组长度=1 applied=3", r9.applied, 3);
+eq("锚点 ease 全 eiLen=1(SPATIAL 规则)", mp9.log.ease, [
+    {idx: 1, eiLen: 1, eiInf: 0.1, eiSpd: 0, eoLen: 1, eoInf: 42, eoSpd: 0},
+    {idx: 2, eiLen: 1, eiInf: 42, eiSpd: 0, eoLen: 1, eoInf: 42, eoSpd: 0},
+    {idx: 3, eiLen: 1, eiInf: 42, eiSpd: 0, eoLen: 1, eoInf: 0.1, eoSpd: 0}
+]);
+// 缩放(2D,非空间):easeArr 2 个元素
+var mp10 = mockProp(false, "ADBE Scale");
+var r10 = QK.applySegCurves(mp10, [
+    {t: 0, v: [100, 100], idx: 1},
+    {t: 1, v: [200, 200], idx: 2},
+    {t: 2, v: [300, 300], idx: 3}
+], [
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1},
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1}
+]);
+eq("缩放 缓动数组长度=2 applied=3", r10.applied, 3);
+eq("缩放 ease 全 eiLen=2(非空间规则)", mp10.log.ease, [
+    {idx: 1, eiLen: 2, eiInf: 0.1, eiSpd: 0, eoLen: 2, eoInf: 42, eoSpd: 0},
+    {idx: 2, eiLen: 2, eiInf: 42, eiSpd: 0, eoLen: 2, eoInf: 42, eoSpd: 0},
+    {idx: 3, eiLen: 2, eiInf: 42, eiSpd: 0, eoLen: 2, eoInf: 0.1, eoSpd: 0}
+]);
+// 3D 场景(v0.2.16 规则覆盖):3D 位置(SPATIAL)=1、3D 缩放(非空间)=3
+var mp11 = mockProp(false, "ADBE Position");
+var r11 = QK.applySegCurves(mp11, [
+    {t: 0, v: [0, 100, 0], idx: 1},
+    {t: 1, v: [300, 100, 0], idx: 2},
+    {t: 2, v: [600, 100, 0], idx: 3}
+], [
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1},
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1}
+]);
+eq("3D 位置(SPATIAL)缓动数组=1 applied=3", r11.applied, 3);
+eq("3D 位置 ease 全 eiLen=1", (mp11.log.ease.length === 3 && mp11.log.ease[0].eiLen === 1 && mp11.log.ease[2].eiLen === 1), true);
+var mp12 = mockProp(false, "ADBE Scale");
+var r12 = QK.applySegCurves(mp12, [
+    {t: 0, v: [100, 100, 100], idx: 1},
+    {t: 1, v: [200, 200, 200], idx: 2},
+    {t: 2, v: [300, 300, 300], idx: 3}
+], [
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1},
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1}
+]);
+eq("3D 缩放(非空间)缓动数组=3 applied=3", r12.applied, 3);
+eq("3D 缩放 ease 全 eiLen=3", (mp12.log.ease.length === 3 && mp12.log.ease[0].eiLen === 3 && mp12.log.ease[2].eiLen === 3), true);
+
+console.log(failures === 0 ? "ALL PASS (" + 116 + " assertions)" : failures + " FAILURES");
 process.exit(failures === 0 ? 0 : 1);

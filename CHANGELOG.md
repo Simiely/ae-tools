@@ -18,7 +18,10 @@
 - v0.2.12 曲线逻辑重写：三层职责分离(纯转换 bezierToEase / AE 应用 applySegCurves 按帧索引直存 / 打帧 setKeyAt),公式集中一处,消除 8 轮补丁缠绕;行为零变化
 - v0.2.13 修复真机「非法使用保留字」：对象属性名不能用 in(ES3 保留字,ExtendScript 拒绝,node 拦不住);in→inE,AGENTS 坑 18 扩为三雷
 - v0.2.14 修复线性段端点被"僵直"变形：线性 = 匀速(官方文档),端点速度必须 = 段平均速度,原速度 0 是静止非线性;跳过判断改"两侧段都线性"
-- 状态：开发中（v0.2.14，曲线功能待真机验证）；四件套文档齐 + test_quickkey.js 回归测试（105 断言）
+- v0.2.15 新增端点平滑开关：曲线两端「硬/平滑」可选,平滑 = 首帧/末帧速度归零(两端圆润,像 Easy Ease),首/末帧强制转 BEZIER
+- v0.2.16 修复 2D 属性曲线报「值数组没有 1 元素」：SPATIAL(位置/锚点/方向)缓动数组恒 1 个(官方指南),新增 easeDimOf 按 matchName+实际值维度,不再用 propDimOf
+- v0.3.0 UI 层重构(阶段 1 主线)：行池工厂 makeRowPool 统一两套行池、构建分块 buildHeader/buildNodeArea/buildCurveArea/buildFooter、刷新拆分 refreshHeader/refreshNodes/refreshCurve、控件引用分组为行对象;纯逻辑/预检/执行层一行未动,116 断言全过
+- 状态：开发中（v0.3.0，UI 重构待真机验证）；四件套文档齐 + test_quickkey.js 回归测试（116 断言）
 
 ## v1.0.3
 

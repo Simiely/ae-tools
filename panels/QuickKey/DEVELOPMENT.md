@@ -2,6 +2,94 @@
 
 > 一坑一篇,按时间倒序。只记录"代码里看不出的信息"。
 
+## v0.3.0(2026-08-19)— UI 层重构:行池工厂 + 构建分块 + 刷新拆分(阶段 1:主线)
+
+### 起因
+
+用户要求按"最好优化效果"重构(程序量小,风险可控),先主线后支线。
+上次评估:主线 8.5 / 支线 8 / 模块化 7.5(整体)/ 6.5(UI)——扣分集中在
+UI 层:两套行池重复、refresh() 过载、控件引用分散。
+
+### 重构内容(纯逻辑/预检/执行层一行未动)
+
+1. **makeRowPool 行池工厂**:统一"懒增长 + visible 切换",返回
+   {rows, ensure(need), hideAll, get(i)};节点行/段行共用,消除重复模式
+2. **构建分块**:buildHeader / buildNodeArea / buildCurveArea / buildFooter
+   ——每个函数只建自己那块 UI,控件引用作为行对象返回
+3. **刷新拆分**:refresh = refreshHeader + refreshNodes + refreshCurve
+   ——原 refresh 干 4 件事(节点/按钮文案/曲线/布局),现在每块管一件事
+4. **行对象引用**:it = {row, chk, lbl, inp, vin, tme} / {row, lbl, dd, ins},
+   取代平行对象字典(chk[slot]/lbl[slot]/...)——引用随行走,闭包捕获天然正确
+
+### 验证
+
+116 断言全过(纯逻辑未动)、语法 ✓、BOM ✓、已部署。行为零变化:
+事件仍是"瘦处理器 → state → refresh"单向流;行池懒增长性能不变。
+
+### 待真机
+
+重启 AE 全功能回归(打帧/曲线/端点平滑/Tab 循环/表达式/导出导入)。
+验证通过后进入阶段 2(支线:表达式/导出导入/调试收尾检查)。
+
+## v0.2.16(2026-08-19)— SPATIAL 属性缓动数组长度=1(「值数组没有 1 元素」)
+
+### 起因
+
+1 个空(旋转,OneD)曲线正常;2 个空(锚点,2D_SPATIAL)报
+「由于参数 2,无法调用 setTemporalEaseAtKey。值数组没有 1 元素」。
+
+### 根因(官方指南定案)
+
+manualslib 收录的 Adobe 官方脚本指南 p147:
+
+> "The dimension of the array depends on the property's keyframeValueType.
+> For ThreeD, 3. For TwoD, 2. **For all other keyframeValueTypes, including
+> TwoD_SPATIAL and ThreeD_SPATIAL types, it is 1.**"
+
+即:**SPATIAL 属性(位置/锚点/方向)即使 2D/3D,缓动数组也只收 1 个**
+(Paul Tuersley 社区确认 Position 只有一组速度缓动)。我们此前用
+propDimOf(锚点 2D→2)生成 2 个元素的数组 → AE 拒绝。
+
+### 修复
+
+新增 `easeDimOf(prop, v)`:
+- SPATIAL(matchName = ADBE Position / Anchor Point / Orientation)→ 恒 1
+- 缩放等非空间 → 按实际写入值 v 的维度(数组长度:2D→2、3D→3)
+- 不依赖 propertyValueType(AE 2026 的 2D 变换属性报 3D 类型,不可靠)
+
+### 教训
+
+**「属性维度」(位数预检用)和「缓动数组长度」(setTemporalEaseAtKey 用)
+是两个不同的概念,不能复用**——一个按"值有几维",一个按"SPATIAL 与否"。
+node mock 一直测 1D 属性,2D 维度差异只有真机才暴露。
+
+## v0.2.15(2026-08-19)— 端点平滑开关:两端速度归零
+
+### 起因
+
+用户反馈曲线序列首帧/末帧端点"硬"(起点直接有速度、终点或被跳过保持
+LINEAR 直线角),要开关选「硬 / 平滑」。AskUserQuestion 确认语义:
+**平滑 = 两端速度归零**(起点静止加速、终点减速静止,曲线两端水平圆润)。
+
+### 实现
+
+`applySegCurves(prop, frames, segs, smoothEnd)` 第 4 参:
+- 平滑:首段「出」/末段「入」速度强制 0;端点邻接线性段时线性端点速度也置 0
+  (linSpd=0);首/末帧即使两侧段都线性也不跳过(强制转 BEZIER)
+- 硬(默认 false):行为完全不变(既有 105 断言全部原样通过)
+
+UI:曲线功能行(常驻可见)新增「端点平滑」checkbox,直接写 state.curve.smoothEnd。
+
+### 设计说明
+
+- 平滑只动**边界速度**(首段出/末段入),不动中间段——曲线的"性格"保留,
+  只是两端圆润
+- 全线性 + 平滑 = 帧1/帧3 转 BEZIER 速度 0、帧2 保持 LINEAR(起点静止 →
+  中间匀速 → 终点静止,合理)
+- 全缓入缓出 + 平滑 = 与硬一致(缓入缓出端点速度本就 0,强制无变化)
+- 教训延续:写 conv.inE 别写成 conv.in(v0.2.13 的坑,本次重写又犯一次,
+  已 grep 修正)——**bezierToEase 的返回值字段是 out/inE**
+
 ## v0.2.14(2026-08-19)— 线性段端点被"僵直"变形:线性 = 匀速,不是速度 0
 
 ### 起因

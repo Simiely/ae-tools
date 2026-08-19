@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**:2026-08-19(v0.2.14)
+> 📌 **文档基线**:2026-08-19(v0.3.0)
 > **更新文档/代码后,请更新此行**(日期 + 新 commit hash),并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
@@ -11,25 +11,33 @@
 - ScriptUI Panel 单文件交付,免安装(放 `ScriptUI Panels/`)
 - 脚本文件必须 **UTF-8 带 BOM**(ExtendScript 引擎否则中文乱码;install.py 部署时自动补)
 
-## 代码结构(v0.1.14 重构后,按此分层维护)
+## 代码结构(v0.3.0 UI 层重构后,按此分层维护)
 
 ```
 单文件 IIFE(ES3)
 ├─ 纯逻辑层(node 可测,必须进 test_quickkey.js):
 │   anchorPos / computeTimes / classifyValue / buildPlan / planHasExplicit / cellsRaw
 │   + 曲线(v0.2.0):matchPreset / curveSegments / mergePresets / validatePresets
-│     / isLinearPreset / valDiff / clonePreset
-├─ 预检层(AE 依赖,不测):propDimOf / propLayerInfo / dimCheck / failDimCheck
+│     / isLinearPreset / bezierToEase / valDiff / clonePreset
+├─ 预检层(AE 依赖,不测):propDimCore / propDimOf / easeDimOf / propTypeName
+│   / propLayerInfo / dimCheck / failDimCheck
 ├─ 公共辅助:withUndo(undo 组) / perProp(逐属性执行+计数) / setStatus / propName / errMsg
 ├─ 执行层:doKey(校验→计划→预检→执行→报告,各调一段) / executePlan(只写 AE+曲线)
 │   / buildReport(纯文本) / applyExpression(支线,复用 withUndo+perProp)
-│   / applySegCurves(曲线套用,AE 依赖) / exportPresets / importPresets
-└─ UI 层:面板构建 / addRow·ensureRows(行池)/ addSegRow·segRows(曲线段行池)
-    / refresh / syncSegDropdown / rebuildPresetDropdowns / showReport
+│   / applySegCurves(曲线套用,AE 依赖) / setKeyAt / exportPresets / importPresets
+└─ UI 层(v0.3.0 重组):
+    ├─ 公共:showReport / makeRowPool(行池工厂,节点/段行共用)/
+    │        bindNumTab·focusNextNum(Tab 数字框循环)
+    ├─ 构建:buildHeader / buildNodeArea / buildCurveArea / buildFooter(各建一块)
+    ├─ 刷新:refresh = refreshHeader + refreshNodes + refreshCurve(唯一渲染入口)
+    └─ 曲线:syncSegDropdown / rebuildPresetDropdowns
 ```
 
 **规则**:① 新逻辑能纯函数化就放纯逻辑层并补断言;② 报告与执行永远分离,别再交错;
-③ 新的"逐属性操作"必须复用 perProp;④ 新的 undo 操作必须复用 withUndo。
+③ 新的"逐属性操作"必须复用 perProp;④ 新的 undo 操作必须复用 withUndo;
+⑤ **UI 控件行一律走 `makeRowPool` 行池工厂**(懒增长 + visible 切换,禁止手写第二套行池);
+⑥ **新刷新逻辑放 refreshNodes/refreshCurve/refreshHeader,别往 refresh() 里堆**;
+⑦ 行对象引用分组(`it = {row, chk, lbl, inp, vin, tme}`),禁止新开平行对象字典。
 
 ## 关键坑(改代码前必读)
 
@@ -57,7 +65,7 @@
 14. **曲线功能(v0.2.0/0.2.2)**:「曲线功能」**开关行常驻可见**(checkbox + 导出/导入按钮不藏进隐藏组——否则开关默认关时入口消失,用户永远勾不到,v0.2.2 修复);**段 = 开启节点的相邻对**(`curveSegments(on, count)`,关闭节点断开链条、段随开关重排——关闭剔除语义的自然延伸,不是固定槽位对);段状态 `state.curve.seg[i]` 按段序号存(ensureCurveSeg 补齐默认线性),段数变化值保留;段行懒增长 `ensureSegRows`
 15. **预设下拉交互**:下拉 items = [「自定义」, ...state.curve.presets(内置 4 + 导入)];`syncSegDropdown` 用 `matchPreset`(浮点容差 1e-4)匹配 4 值——命中 → 显示预设名,否则「自定义」;**选预设 → 填 4 空(直接写 segIn 文本,不调 refresh)**;**手填 4 空 → 只调 syncSegDropdown(别调 refresh,别写回文本)**,否则正在编辑的框会被重置
 16. **导出/导入预设**:导出 = `state.curve.presets` 全部(内置 + 已导入)→ JSON `{version:1, presets:[{name,x1,y1,x2,y2}]}`,`File.saveDialog` 默认当前工程目录,`f.encoding="UTF-8"`(中文名不乱码);**序列化用 `stringifyPresets`、解析用 `parsePresetsText`(自包含,勿依赖全局 JSON,见坑 18)** → `mergePresets` 同名覆盖 → `rebuildPresetDropdowns()` 重建全部段下拉(removeAll + add,不要重建控件)
-17. **曲线套用(打帧时,v0.2.12 重写 / 0.2.14 修线性端点)**:① 打帧用 **`setKeyAt(prop, t, wv)`**——“创建即得索引”:先按时间找已有帧(容差 ±0.05s)复用其索引,无则 `prop.addKey(t)` 直接返回新帧索引(官方文档:addKey "returns the index of the new keyframe"),`setValueAtKey` 设值;addKey 异常兜底 setValueAtTime+numKeys。**严禁回到"打完再按时间找索引"**(真机「3 索引无效」;社区确认 AE 关键帧放置有精度问题,Paul Tuersley)。② 转换公式集中在 **`bezierToEase(x1,y1,x2,y2,avg)`(纯函数)**:线性(0 0 1 1)→ null;非线性 → X 坐标→影响(x1×100、[1−x2]×100,钳 0.1~100 取整 1 位)、Y 坐标→速度(y1×avg/x1、[1−y2]×avg/[1−x2],除零退 avg)。③ `applySegCurves` 只做组装:逐段调 bezierToEase → 缓动按【帧索引】直存 inEase[k]/outEase[k](帧 k 出 = 段 k 出,帧 k+1 入 = 段 k 入;首帧入/末帧出 = NEUTRAL)→ 逐帧「**两侧段都线性(或边界无段)才跳过**」,否则先 `setInterpolationTypeAtKey(idx, BEZIER, BEZIER)` 再 `setTemporalEaseAtKey(idx, easeArr, easeArr)`。**线性段端点缓动 = `KeyframeEase(段平均速度, 0.1)`(线性 = 匀速,官方文档 "uniform rate of change")——严禁速度 0**(v0.2.14 真机 bug:曲线段末帧端点被线性侧速度 0 "僵直"变形;全线性场景仍完全不动保持默认 LINEAR)。**AE 侧三个硬约束:插值必须 BEZIER**(setValueAtTime/addKey 打的帧默认 LINEAR,直接设缓动不生效 v0.2.3);**缓动参数是数组**(1D=1/2D=2/3D=3 个 KeyframeEase,按 propDimOf 包,v0.2.6 官方文档);**influence 合法 [0.1..100]**(传 0 构造抛错整段失败,NEUTRAL 钳 0.1,v0.2.8)。missed 细分 missIdx(索引无效)/missErr(调用抛错带文本),报告直接显示。**改 applySegCurves/bezierToEase/setKeyAt 必须跑 test_quickkey.js mock 核验**(已模拟真实约束 + addKey 索引 + failEase 抛错 + 线性端点匀速断言)。表达式模式禁用曲线(vtype===3 直接走 applyExpression)
+17. **曲线套用(打帧时,v0.2.12 重写 / 0.2.14 修线性端点 / 0.2.15 端点平滑)**:① 打帧用 **`setKeyAt(prop, t, wv)`**——“创建即得索引”:先按时间找已有帧(容差 ±0.05s)复用其索引,无则 `prop.addKey(t)` 直接返回新帧索引(官方文档:addKey "returns the index of the new keyframe"),`setValueAtKey` 设值;addKey 异常兜底 setValueAtTime+numKeys。**严禁回到"打完再按时间找索引"**(真机「3 索引无效」;社区确认 AE 关键帧放置有精度问题,Paul Tuersley)。② 转换公式集中在 **`bezierToEase(x1,y1,x2,y2,avg)`(纯函数)**:线性(0 0 1 1)→ null;非线性 → X 坐标→影响(x1×100、[1−x2]×100,钳 0.1~100 取整 1 位)、Y 坐标→速度(y1×avg/x1、[1−y2]×avg/[1−x2],除零退 avg)。③ `applySegCurves(prop, frames, segs, smoothEnd)` 只做组装:逐段调 bezierToEase → 缓动按【帧索引】直存 inEase[k]/outEase[k](帧 k 出 = 段 k 出,帧 k+1 入 = 段 k 入;首帧入/末帧出 = NEUTRAL)→ 逐帧「**两侧段都线性(或边界无段)才跳过**」,否则先 `setInterpolationTypeAtKey(idx, BEZIER, BEZIER)` 再 `setTemporalEaseAtKey(idx, easeArr, easeArr)`。**线性段端点缓动 = `KeyframeEase(段平均速度, 0.1)`(线性 = 匀速,官方文档 "uniform rate of change")——严禁速度 0**(v0.2.14 真机 bug:曲线段末帧端点被线性侧速度 0 "僵直"变形;全线性场景仍完全不动保持默认 LINEAR)。**端点平滑 smoothEnd(v0.2.15)**:首段「出」/末段「入」速度强制 0(曲线两端水平圆润),端点邻接线性段时线性端点速度也置 0,首/末帧即使两侧段都线性也不跳过(转 BEZIER);「硬」(默认)行为完全不变。**AE 侧三个硬约束:插值必须 BEZIER**(setValueAtTime/addKey 打的帧默认 LINEAR,直接设缓动不生效 v0.2.3);**缓动参数是数组且长度按官方规则 `easeDimOf(prop, v)`(v0.2.16)**:SPATIAL 属性(位置/锚点/方向,matchName 判断)**恒 1 个**,缩放等非空间按实际值 v 维度(2D→2、3D→3)——**严禁用 propDimOf 或 propertyValueType 算缓动数组长度**(AE 2026 的 2D 锚点报 ThreeD_SPATIAL 且缓动只收 1 个,propDimOf 返回 2 报「值数组没有 1 元素」,v0.2.16 真机 bug);**influence 合法 [0.1..100]**(传 0 构造抛错整段失败,NEUTRAL 钳 0.1,v0.2.8)。missed 细分 missIdx(索引无效)/missErr(调用抛错带文本),报告直接显示。**改 applySegCurves/bezierToEase/setKeyAt 必须跑 test_quickkey.js mock 核验**(已模拟真实约束 + addKey 索引 + failEase 抛错 + 线性端点匀速 + 平滑端点断言)。表达式模式禁用曲线(vtype===3 直接走 applyExpression)
 18. **ExtendScript 三个隐藏雷(真机踩坑)**:
     - **禁止在正则字面量里写 `\\`(双反斜杠)**——ExtendScript 解析器报「语法错误」(node/V8 能过,node --check 拦不住;真机报「行 794 无法执行脚本」,v0.2.1)。需要匹配反斜杠时改用字符串方法(indexOf/lastIndexOf/substring)或 `new RegExp("...")` 字符串构造
     - **对象字面量属性名禁止用 ES3 保留字**(如 `in`/`new`/`var`/`default` 等)——报「非法使用保留字」(node 现代引擎允许保留字做属性名,node --check 拦不住;真机报「行 237 无法执行脚本」,v0.2.13 bezierToEase 的 `{out, in}` 踩坑)。属性名改用非保留字(如 `inE`);**新增对象字面量后 grep 一遍 `(?:[{,]\s*)(in|new|var|...)\s*:`**

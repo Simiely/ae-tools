@@ -1,49 +1,52 @@
 ﻿// ============================================================
 // QuickKey · 节点式 K 帧排程面板  QuickKey.jsx
-// 版本: 0.2.14  (2026-08-19)
+// 版本: 0.3.0  (2026-08-19)
 // 适用: After Effects CC 2015.3+ (依赖 selectedProperties API)
 //
 // 以当前时间指示器为锚点,按节点排程给选中属性批量打关键帧;
 // 曲线功能为每段套 cubic-bezier 缓动;预设可导出/导入 JSON。
 //
 // 代码地图(用函数名定位,行号会随编辑漂移):
-//   纯逻辑层(node 可测,test_quickkey.js 105 断言):
+//   纯逻辑层(node 可测,test_quickkey.js 116 断言):
 //     排程: anchorPos / computeTimes / classifyValue / buildPlan / planHasExplicit
 //     曲线: matchPreset / curveSegments / mergePresets / validatePresets /
 //            isLinearPreset / bezierToEase / valDiff
 //     迷你 JSON(ES3 自包含,勿依赖全局 JSON): stringifyPresets /
 //            parsePresetsText / extractPresetsFallback
-//   预检层(AE 依赖): propDimOf / propLayerInfo / dimCheck / failDimCheck
+//   预检层(AE 依赖): propDimCore / propDimOf / easeDimOf / propTypeName /
+//            propLayerInfo / dimCheck / failDimCheck
 //   公共辅助: withUndo / perProp / setStatus / propName / errMsg
 //   执行层: setKeyAt / applySegCurves / executePlan / buildReport /
 //            applyExpression / doKey / exportPresets / importPresets
-//   UI 层: 面板构建 / addRow·ensureRows(节点行池)/ addSegRow·ensureSegRows
-//           (曲线段行池,懒增长)/ refresh / syncSegDropdown /
-//           rebuildPresetDropdowns / showReport
+//   UI 层(v0.3.0 重组):
+//     公共: showReport(调试弹窗)/ makeRowPool(行池工厂)/
+//           bindNumTab·focusNextNum(Tab 数字框循环)
+//     构建: buildHeader(节点数/模式/数值类型/表达式)/
+//           buildNodeArea(节点行池)/ buildCurveArea(曲线开关+段行池)/
+//           buildFooter(打帧/调试按钮+状态栏)
+//     刷新: refresh = refreshHeader + refreshNodes + refreshCurve
+//     曲线: syncSegDropdown / rebuildPresetDropdowns
 //
 // 关键设计(改代码前必读,详见 AGENTS.md / DEVELOPMENT.md):
 //   - 间隔 = 与「靠锚点侧最近开启节点」的帧距;关闭节点完全剔除
 //   - 曲线段 = 开启节点的相邻对;总开关常驻可见,段行区随开关显隐
 //   - 维度判断:变换属性以图层 threeDLayer 开关为准(AE 2026 的 2D 变换
 //     属性 value/propertyValueType 都报 3D,勿用这两者判断)
-//   - 曲线套用(v0.2.12 重写 / 0.2.14 修线性端点):打帧用 setKeyAt
-//     (addKey 创建即得索引);逐段 bezierToEase(公式集中一处)→ 逐帧先转
-//     BEZIER 插值再 setTemporalEaseAtKey(缓动参数是【数组】,1D/2D/3D = 1/2/3 个);
-//     线性段端点缓动 = 段平均速度(线性 = 匀速,严禁速度 0——会僵直相邻曲线段);
-//     帧两侧段都线性(或边界无段)才跳过,保持 AE 默认线性
+//   - 曲线套用(v0.2.12 重写 / 0.2.14 修线性端点 / 0.2.15 端点平滑):
+//     打帧用 setKeyAt(addKey 创建即得索引);逐段 bezierToEase → 逐帧先转
+//     BEZIER 插值再 setTemporalEaseAtKey(缓动参数是【数组】,长度按
+//     easeDimOf 官方规则:SPATIAL=1、缩放按值维度);线性段端点 = 段平均速度
+//     (线性=匀速,严禁速度 0);平滑模式首/末帧速度归零;帧两侧段都线性才跳过
 //   - ExtendScript 雷区:禁写含双反斜杠的正则字面量(语法错误);
-//     JSON 非原生内置,必须用自带迷你 JSON
+//     对象属性名禁用 ES3 保留字(如 in);JSON 非原生内置,必须用自带迷你 JSON
 //   - 打帧目标 = selectedProperties;整次操作一个 Undo 组(Ctrl+Z 整体撤销)
-//   - Tab 键只在数字输入框之间循环(v0.2.7:onKeyDown 拦 Tab → 手动聚焦下一个
-//     可见数字框,避开开关/下拉/按钮)
-//   - KeyframeEase influence 合法范围 [0.1..100](v0.2.8:传 0 构造抛错→曲线
-//     应用整体失败,报告"1 个属性异常";中性/出侧钳到 0.1≈线性)
-//   - bezier→AE 映射公式(v0.2.9,社区公认):X 坐标→影响(x1×100、[1−x2]×100)、
-//     Y 坐标→速度(y1×avg/x1、[1−y2]×avg/[1−x2]),avg=段平均速度归一化;
-//     之前 X/Y 用反导致"范围对不上"(用户质疑定位)
+//   - Tab 键只在数字输入框之间循环(v0.2.7)
+//   - KeyframeEase influence 合法范围 [0.1..100](v0.2.8)
+//   - bezier→AE 映射公式(v0.2.9,社区公认):X→影响、Y→速度
 //
 // 安装:免安装,文件部署到用户级目录
-//   %APPDATA%\Adobe\After Effects\<ver>\Scripts\ScriptUI Panels//   (本仓库统一用 install.py 部署,自动补 UTF-8 BOM + 字节校验)
+//   %APPDATA%\Adobe\After Effects\<ver>\Scripts\ScriptUI Panels\
+//   (本仓库统一用 install.py 部署,自动补 UTF-8 BOM + 字节校验)
 // 历史版本记录 → CHANGELOG.md;架构与坑 → DEVELOPMENT.md / AGENTS.md
 // ============================================================
 
@@ -88,6 +91,7 @@
         },
         curve: {                         // 曲线功能(v0.2.0)
             enabled: false,              // 总开关
+            smoothEnd: false,            // 端点平滑(v0.2.15):首帧/末帧速度归零,两端圆润
             presets: curvePresetsInit,   // 预设列表(内置 + 导入,同名覆盖)
             seg: {}                      // 段 1..n: {preset, x1, y1, x2, y2}
         }
@@ -484,6 +488,24 @@
         return 0;   // COLOR/自定义/文本等 → 不预检,执行时兜底
     }
 
+    // setTemporalEaseAtKey 缓动数组长度(官方指南,与 propDimOf 的"位数预检"
+    // 语义不同!):SPATIAL 属性(位置/锚点/方向)恒 1 个 KeyframeEase——
+    // 官方指南: "For all other keyframeValueTypes, including TwoD_SPATIAL and
+    // ThreeD_SPATIAL types, it is 1";Paul Tuersley 社区确认 Position 只有
+    // 一组速度缓动。缩放等非空间属性按实际值维度(2D→2、3D→3)。用
+    // matchName + 实际写入值 v 判断,不依赖 propertyValueType(AE 2026 的
+    // 2D 变换属性也报 3D 类型,v0.2.16 真机 bug「值数组没有 1 元素」)
+    function easeDimOf(prop, v) {
+        try {
+            var mn = "";
+            try { mn = String(prop.matchName); } catch (e2) {}
+            if (mn === "ADBE Position" || mn === "ADBE Anchor Point"
+                || mn === "ADBE Orientation") { return 1; }
+            if (v instanceof Array && v.length >= 2) { return v.length; }
+        } catch (e) {}
+        return 1;
+    }
+
     // 属性类型常量名(诊断用):返回 "ThreeD_SPATIAL" 之类,读不到返回 "?"
     function propTypeName(prop) {
         try {
@@ -653,25 +675,30 @@
         return idx;
     }
 
-    // 给一个属性的关键帧序列套缓动曲线(v0.2.12 重写,0.2.14 修线性端点):
+    // 给一个属性的关键帧序列套缓动曲线(v0.2.12 重写,0.2.14 修线性端点,
+    // 0.2.15 加端点平滑):
     //   frames = [{t, v, idx}] 按时间升序;idx 来自打帧时 setKeyAt 的 addKey 返回值
     //   segs   = 每段 {x1,y1,x2,y2}(长度 m-1,bezier 0~1)
+    //   smoothEnd = true 时(端点平滑):首帧「出」/末帧「入」速度强制 0(曲线
+    //   两端水平圆润,像 Easy Ease 起止静止);首/末帧即使两侧段都线性也不
+    //   跳过(转 BEZIER)——「硬」(默认)则保持现状(端点按各段曲线直接连,
+    //   线性段端点匀速、边界帧可保持 LINEAR)
     // 流程:
     //   1. 逐段 bezierToEase(avg = 段值差/时差)→ 每段的入/出缓动
     //   2. 帧 k 的「出」= 段 k 的「出」,帧 k+1 的「入」= 段 k 的「入」;
     //      首帧「入」/末帧「出」= NEUTRAL
     //   3. 线性段端点缓动 = KeyframeEase(段平均速度, 0.1)——线性 = 匀速
-    //      (官方文档 "uniform rate of change"),速度必须 = 段平均速度;
-    //      原 NEUTRAL 速度 0 会把相邻曲线段的端点"僵直"变形(v0.2.14 真机 bug)
+    //      (官方文档 "uniform rate of change");平滑模式端点邻接线性段时速度 0
     //   4. 帧两侧都属于线性段(或边界无段)→ 跳过,保持 AE 默认线性插值;
-    //      否则先转 BEZIER 插值再设缓动(setTemporalEaseAtKey 参数是【数组】)
+    //      平滑模式首/末帧例外(强制转 BEZIER);否则先转 BEZIER 再设缓动
     // 返回 {applied, missed, missIdx, missErr, missErrMsg}
-    function applySegCurves(prop, frames, segs) {
+    function applySegCurves(prop, frames, segs, smoothEnd) {
         var m = frames.length;
         var EMPTY = {applied: 0, missed: 0, missIdx: 0, missErr: 0, missErrMsg: ""};
         if (m < 2) { return EMPTY; }
-        var dim = 1;
-        try { var pd = propDimOf(prop); if (pd > 0) { dim = pd; } } catch (e9) {}
+        // 缓动数组长度按官方规则(v0.2.16):SPATIAL(位置/锚点/方向)=1,
+        // 缩放等按实际值维度;不能用 propDimOf(锚点 2D 返回 2,AE 只收 1)
+        var dim = easeDimOf(prop, frames[0].v);
         function easeArr(e) {
             var arr = [];
             for (var d = 0; d < dim; d++) { arr.push(e); }
@@ -686,12 +713,22 @@
             var dt = frames[j].t - frames[j - 1].t;
             var avg = (dt > 0.000001) ? valDiff(frames[j].v, frames[j - 1].v) / dt : 0;
             var conv = sg ? bezierToEase(sg.x1, sg.y1, sg.x2, sg.y2, avg) : null;
+            var isFirstSeg = (j === 1);
+            var isLastSeg = (j === m - 1);
             if (conv) {
-                outEase[j] = new KeyframeEase(conv.out.speed, conv.out.influence);
-                inEase[j + 1] = new KeyframeEase(conv.inE.speed, conv.inE.influence);
+                var outSpd = conv.out.speed;
+                var inSpd = conv.inE.speed;
+                if (smoothEnd) {
+                    if (isFirstSeg) { outSpd = 0; }   // 起点速度归零(0.2.15)
+                    if (isLastSeg) { inSpd = 0; }     // 终点速度归零(0.2.15)
+                }
+                outEase[j] = new KeyframeEase(outSpd, conv.out.influence);
+                inEase[j + 1] = new KeyframeEase(inSpd, conv.inE.influence);
             } else {
-                outEase[j] = new KeyframeEase(avg, 0.1);    // 线性 = 匀速(0.2.14)
-                inEase[j + 1] = new KeyframeEase(avg, 0.1);
+                var linSpd = avg;                    // 线性 = 匀速(0.2.14)
+                if (smoothEnd && (isFirstSeg || isLastSeg)) { linSpd = 0; }   // 端点邻接线性也圆润
+                outEase[j] = new KeyframeEase(linSpd, 0.1);
+                inEase[j + 1] = new KeyframeEase(linSpd, 0.1);
             }
         }
         var NEUTRAL = new KeyframeEase(0, 0.1);   // 仅用于边界:首帧入 / 末帧出
@@ -708,7 +745,8 @@
             var segR = (k < m) ? segs[k - 1] : null;
             var linL = !segL || isLinearPreset(segL.x1, segL.y1, segL.x2, segL.y2);
             var linR = !segR || isLinearPreset(segR.x1, segR.y1, segR.x2, segR.y2);
-            if (linL && linR) { continue; }   // 两侧都线性 → 保持 AE 默认线性插值
+            // 平滑模式:首/末帧强制转 BEZIER(端点圆润),不因邻接线性而跳过
+            if (!(smoothEnd && (k === 1 || k === m)) && linL && linR) { continue; }
             var inE = (k > 1) ? inEase[k] : NEUTRAL;
             var outE = (k < m) ? outEase[k] : NEUTRAL;
             try {
@@ -726,7 +764,7 @@
     }
 
     // 执行计划:只写 AE(setValueAtTime + 可选曲线),不拼报告
-    // opts: {curveOn, curveSegs} — curveOn=true 时对每个属性套曲线
+    // opts: {curveOn, curveSegs, smoothEnd} — curveOn=true 时对每个属性套曲线
     // 返回 {kfCount, badCount, fails, curveApplied, curveMissed, curveFail, curveErr}
     function executePlan(comp, props, plan, opts) {
         var kfCount = 0;
@@ -774,7 +812,7 @@
                     var frames = propFrames[p];
                     if (frames.length >= 2) {
                         try {
-                            var cr = applySegCurves(props[p], frames, opts.curveSegs);
+                            var cr = applySegCurves(props[p], frames, opts.curveSegs, opts.smoothEnd);
                             curveApplied += cr.applied;
                             curveMissed += cr.missed;
                             curveMissIdx += cr.missIdx;
@@ -915,7 +953,11 @@
         }
 
         // 执行 + 报告
-        var result = executePlan(comp, props, plan, {curveOn: (curveSegs !== null), curveSegs: curveSegs});
+        var result = executePlan(comp, props, plan, {
+            curveOn: (curveSegs !== null),
+            curveSegs: curveSegs,
+            smoothEnd: state.curve.smoothEnd    // v0.2.15:端点平滑
+        });
         var curveNames = null;
         if (curveSegs !== null) {
             curveNames = [];
@@ -1018,92 +1060,10 @@
         pal.spacing = 6;
         pal.margins = 8;
 
-        // 节点数行(1~30,改后回车生效)— 排在最上面
-        var grpCount = pal.add("group");
-        grpCount.orientation = "row";
-        grpCount.alignChildren = ["fill", "center"];
-        grpCount.spacing = 6;
-        grpCount.add("statictext", undefined, "节点数(1~30):");
-        var cntInp = grpCount.add("edittext", undefined, String(state.count));
-        cntInp.characters = 3;
-        cntInp.onChange = function () {
-            var v = parseInt(cntInp.text, 10);
-            if (isNaN(v) || v < 1) { v = 1; }
-            if (v > MAX_COUNT) { v = MAX_COUNT; }
-            if (v !== state.count) {
-                state.count = v;
-                resizeState(v);
-                ensureRows();
-                refresh();
-                pal.layout.layout(true);
-            }
-            cntInp.text = String(state.count);
-        };
-
-        // 模式行
-        var grpMode = pal.add("group");
-        grpMode.orientation = "row";
-        grpMode.alignChildren = ["fill", "center"];
-        grpMode.spacing = 6;
-        grpMode.add("statictext", undefined, "当前时间指示器作为:");
-        var ddMode = grpMode.add("dropdownlist", undefined, MODE_NAMES);
-        ddMode.selection = ddMode.items[0];   // 默认起始帧
-
-        // 数值类型行(1/2/3 空 / 表达式)
-        var grpType = pal.add("group");
-        grpType.orientation = "row";
-        grpType.alignChildren = ["fill", "center"];
-        grpType.spacing = 6;
-        grpType.add("statictext", undefined, "数值输入:");
-        var ddType = grpType.add("dropdownlist", undefined, VTYPE_NAMES);
-        ddType.selection = ddType.items[0];   // 默认 1 个空
-        var typeHint = grpType.add("statictext", undefined, "空=数组维度");
-        typeHint.preferredSize.width = 84;
-
-        // 表达式行(仅表达式模式显示)
-        var grpExpr = pal.add("group");
-        grpExpr.orientation = "row";
-        grpExpr.alignChildren = ["fill", "center"];
-        grpExpr.spacing = 6;
-        grpExpr.add("statictext", undefined, "表达式:");
-        var exprInp = grpExpr.add("edittext", undefined, state.expr);
-        exprInp.characters = 26;
-        exprInp.onChange = function () { state.expr = exprInp.text; };
-
-        // 节点区(行池:预建足量行,按 count 切换 visible,不重建控件)
-        var grpNodes = pal.add("group");
-        grpNodes.orientation = "column";
-        grpNodes.alignChildren = ["fill", "top"];
-        grpNodes.spacing = 4;
-
-        // 列头:开关 | 节点 | 间隔 | 数值 | 时间
-        var head = grpNodes.add("group");
-        head.orientation = "row";
-        head.alignChildren = ["fill", "center"];
-        head.spacing = 6;
-        var hSp = head.add("statictext", undefined, "");
-        hSp.preferredSize.width = 18;
-        var hLbl = head.add("statictext", undefined, "节点");
-        hLbl.preferredSize.width = 130;
-        var hGap = head.add("statictext", undefined, "间隔");
-        hGap.preferredSize.width = 40;
-        var hVal = head.add("statictext", undefined, "数值");
-        hVal.preferredSize.width = 120;
-        var hTme = head.add("statictext", undefined, "时间");
-        hTme.preferredSize.width = 50;
-
-        var chk = {};    // 开关引用(按槽位)
-        var lbl = {};    // 标签引用
-        var inp = {};    // 间隔输入引用
-        var vin = {};    // 数值输入引用(每个槽位 3 个框的数组)
-        var tme = {};    // 时间预览引用
-        var rows = [];   // 行控件池(索引 = 槽位 - 1)
-
         // ---- Tab 键只在数字输入框之间循环(v0.2.7)----
         // 方案(搜索确认):ScriptUI edittext 支持 onKeyDown 处理器,event.keyName
-        // 判键、event.preventDefault() 有效(Adobe 官方 NumericEditKeyboardHandler 同款),
-        // 控件 .active = true 可设焦点(ExtendScript wiki)。给每个数字框绑 Tab →
-        // 手动聚焦下一个可见/可用的数字框,避开开关/下拉/按钮。
+        // 判键、event.preventDefault() 有效(Adobe 官方 NumericEditKeyboardHandler
+        // 同款),控件 .active = true 可设焦点(ExtendScript wiki)。
         var numBoxes = [];   // 所有数字输入框(间隔 + 节点数值 + 曲线段数值),按创建顺序
 
         function focusNextNum(current) {
@@ -1133,277 +1093,387 @@
             };
         }
 
-        function addRow(slot) {
-            var row = grpNodes.add("group");
-            row.orientation = "row";
-            row.alignChildren = ["fill", "center"];
-            row.spacing = 6;
-            chk[slot] = row.add("checkbox", undefined, "");
-            lbl[slot] = row.add("statictext", undefined, "节点" + slot);
-            lbl[slot].preferredSize.width = 130;
-            inp[slot] = row.add("edittext", undefined, String(state.gap[slot]));
-            inp[slot].characters = 3;
-            bindNumTab(inp[slot]);
-            vin[slot] = [];
-            for (var k = 0; k < 3; k++) {
-                (function (slot2, k2) {
-                    var box = row.add("edittext", undefined, "");
-                    box.characters = 4;
-                    bindNumTab(box);
-                    box.onChange = function () {
-                        state.val[slot2][k2] = box.text;   // 框对格直写(v0.1.7 数组存储)
-                    };
-                    vin[slot2].push(box);
-                })(slot, k);
-            }
-            tme[slot] = row.add("statictext", undefined, "");
-            tme[slot].preferredSize.width = 50;
-            chk[slot].onClick = function () {
-                state.on[slot] = chk[slot].value;
+        // ---- 行池工厂(v0.3.0 重构):统一"懒增长 + visible 切换"----
+        // createRow(i) 返回 {row, ...控件引用};ensure(need) 补齐行数并切换
+        // 可见性;get(i) 取第 i 行(1-based);hideAll() 隐藏全部(曲线关时)
+        function makeRowPool(createRow) {
+            var rows = [];
+            return {
+                rows: rows,
+                ensure: function (need) {
+                    var added = false;
+                    while (rows.length < need) {
+                        rows.push(createRow(rows.length + 1));
+                        added = true;
+                    }
+                    for (var i = 0; i < rows.length; i++) { rows[i].row.visible = (i + 1) <= need; }
+                    return added;
+                },
+                hideAll: function () {
+                    for (var i = 0; i < rows.length; i++) { rows[i].row.visible = false; }
+                },
+                get: function (i) { return rows[i - 1]; }
+            };
+        }
+
+        // 面板构建产物(供 refresh/事件引用,声明在 isAe 块内)
+        var grpExpr = null;    // 表达式行(随 vtype 显隐)
+        var grpSegs = null;    // 曲线段容器(随曲线开关显隐)
+        var btnKey = null;     // 打帧/应用表达式按钮(文案随 vtype)
+        var status = null;     // 状态栏
+
+        // 顶部行:节点数 / 模式 / 数值类型 / 表达式(v0.3.0 分组构建)
+        function buildHeader() {
+            var grpCount = pal.add("group");
+            grpCount.orientation = "row";
+            grpCount.alignChildren = ["fill", "center"];
+            grpCount.spacing = 6;
+            grpCount.add("statictext", undefined, "节点数(1~30):");
+            var cntInp = grpCount.add("edittext", undefined, String(state.count));
+            cntInp.characters = 3;
+            cntInp.onChange = function () {
+                var v = parseInt(cntInp.text, 10);
+                if (isNaN(v) || v < 1) { v = 1; }
+                if (v > MAX_COUNT) { v = MAX_COUNT; }
+                if (v !== state.count) {
+                    state.count = v;
+                    resizeState(v);
+                    nodePool.ensure(v);
+                    refresh();
+                    pal.layout.layout(true);
+                }
+                cntInp.text = String(state.count);
+            };
+
+            var grpMode = pal.add("group");
+            grpMode.orientation = "row";
+            grpMode.alignChildren = ["fill", "center"];
+            grpMode.spacing = 6;
+            grpMode.add("statictext", undefined, "当前时间指示器作为:");
+            var ddMode = grpMode.add("dropdownlist", undefined, MODE_NAMES);
+            ddMode.selection = ddMode.items[0];   // 默认起始帧
+            ddMode.onChange = function () {
+                state.mode = ddMode.selection.index;
                 refresh();
-                pal.layout.layout(true);   // v0.2.2:开关影响曲线段数,布局即时生效
+                pal.layout.layout(true);
             };
-            inp[slot].onChange = function () {
-                var v = parseInt(inp[slot].text, 10);
-                if (isNaN(v) || v < 0) { v = 0; }
-                state.gap[slot] = v;
-                inp[slot].text = String(v);
+
+            var grpType = pal.add("group");
+            grpType.orientation = "row";
+            grpType.alignChildren = ["fill", "center"];
+            grpType.spacing = 6;
+            grpType.add("statictext", undefined, "数值输入:");
+            var ddType = grpType.add("dropdownlist", undefined, VTYPE_NAMES);
+            ddType.selection = ddType.items[0];   // 默认 1 个空
+            var typeHint = grpType.add("statictext", undefined, "空=数组维度");
+            typeHint.preferredSize.width = 84;
+            ddType.onChange = function () {
+                state.vtype = ddType.selection.index;
                 refresh();
+                pal.layout.layout(true);
             };
-            rows.push(row);
+
+            grpExpr = pal.add("group");
+            grpExpr.orientation = "row";
+            grpExpr.alignChildren = ["fill", "center"];
+            grpExpr.spacing = 6;
+            grpExpr.add("statictext", undefined, "表达式:");
+            var exprInp = grpExpr.add("edittext", undefined, state.expr);
+            exprInp.characters = 26;
+            exprInp.onChange = function () { state.expr = exprInp.text; };
         }
 
-        // 确保行池覆盖 count;超出部分隐藏(缩容再扩容时旧值保留)
-        function ensureRows() {
-            while (rows.length < state.count) { addRow(rows.length + 1); }
-            for (var i = 0; i < rows.length; i++) { rows[i].visible = (i + 1) <= state.count; }
-        }
+        // 节点区(v0.3.0 行池化):列头 + 节点行池
+        var nodePool = null;
+        function buildNodeArea() {
+            var grpNodes = pal.add("group");
+            grpNodes.orientation = "column";
+            grpNodes.alignChildren = ["fill", "top"];
+            grpNodes.spacing = 4;
 
-        // ---------- 曲线区(v0.2.0)----------
+            // 列头:开关 | 节点 | 间隔 | 数值 | 时间
+            var head = grpNodes.add("group");
+            head.orientation = "row";
+            head.alignChildren = ["fill", "center"];
+            head.spacing = 6;
+            var hSp = head.add("statictext", undefined, "");
+            hSp.preferredSize.width = 18;
+            var hLbl = head.add("statictext", undefined, "节点");
+            hLbl.preferredSize.width = 130;
+            var hGap = head.add("statictext", undefined, "间隔");
+            hGap.preferredSize.width = 40;
+            var hVal = head.add("statictext", undefined, "数值");
+            hVal.preferredSize.width = 120;
+            var hTme = head.add("statictext", undefined, "时间");
+            hTme.preferredSize.width = 50;
 
-        // 曲线功能开关行 + 导出/导入
-        var grpCurve = pal.add("group");
-        grpCurve.orientation = "row";
-        grpCurve.alignChildren = ["fill", "center"];
-        grpCurve.spacing = 6;
-        var chkCurve = grpCurve.add("checkbox", undefined, "曲线功能");
-        var btnExport = grpCurve.add("button", undefined, "导出预设");
-        var btnImport = grpCurve.add("button", undefined, "导入预设");
-        chkCurve.onClick = function () {
-            state.curve.enabled = chkCurve.value;
-            refresh();
-            pal.layout.layout(true);
-        };
-        btnExport.onClick = exportPresets;
-        btnImport.onClick = importPresets;
-
-        // 曲线段区(行池:预建 MAX_COUNT-1 行,按段数切换 visible)
-        var grpSegs = pal.add("group");
-        grpSegs.orientation = "column";
-        grpSegs.alignChildren = ["fill", "top"];
-        grpSegs.spacing = 4;
-
-        // 曲线列头:段 | 预设 | x1 y1 x2 y2
-        var segHead = grpSegs.add("group");
-        segHead.orientation = "row";
-        segHead.alignChildren = ["fill", "center"];
-        segHead.spacing = 6;
-        var sh1 = segHead.add("statictext", undefined, "段");
-        sh1.preferredSize.width = 78;
-        var sh2 = segHead.add("statictext", undefined, "预设");
-        sh2.preferredSize.width = 92;
-        var sh3 = segHead.add("statictext", undefined, "x1");
-        sh3.preferredSize.width = 44;
-        var sh4 = segHead.add("statictext", undefined, "y1");
-        sh4.preferredSize.width = 44;
-        var sh5 = segHead.add("statictext", undefined, "x2");
-        sh5.preferredSize.width = 44;
-        var sh6 = segHead.add("statictext", undefined, "y2");
-        sh6.preferredSize.width = 44;
-
-        var segLbl = {};   // 段标签("段1:节点1→2")
-        var segDd = {};    // 预设下拉
-        var segIn = {};    // 4 个输入框(segIn[i][0..3])
-        var segRows = [];  // 段行控件池(索引 = 段序号 - 1)
-
-        // 下拉 items = [自定义] + 全部预设名(v0.2.2:创建行时即全量,懒增长后不会越界)
-        function ddItemsForPresets() {
-            var items = ["自定义"];
-            for (var j = 0; j < state.curve.presets.length; j++) {
-                items.push(state.curve.presets[j].name);
+            // 单行节点:返回 {row, chk, lbl, inp, vin[3], tme}(v0.3.0 引用分组)
+            function createNodeRow(slot) {
+                var row = grpNodes.add("group");
+                row.orientation = "row";
+                row.alignChildren = ["fill", "center"];
+                row.spacing = 6;
+                var it = {row: row};
+                it.chk = row.add("checkbox", undefined, "");
+                it.lbl = row.add("statictext", undefined, "节点" + slot);
+                it.lbl.preferredSize.width = 130;
+                it.inp = row.add("edittext", undefined, String(state.gap[slot]));
+                it.inp.characters = 3;
+                bindNumTab(it.inp);
+                it.vin = [];
+                for (var k = 0; k < 3; k++) {
+                    (function (k2) {
+                        var box = row.add("edittext", undefined, "");
+                        box.characters = 4;
+                        bindNumTab(box);
+                        box.onChange = function () {
+                            state.val[slot][k2] = box.text;   // 框对格直写(v0.1.7 数组存储)
+                        };
+                        it.vin.push(box);
+                    })(k);
+                }
+                it.tme = row.add("statictext", undefined, "");
+                it.tme.preferredSize.width = 50;
+                it.chk.onClick = function () {
+                    state.on[slot] = it.chk.value;
+                    refresh();
+                    pal.layout.layout(true);   // v0.2.2:开关影响曲线段数,布局即时生效
+                };
+                it.inp.onChange = function () {
+                    var v = parseInt(it.inp.text, 10);
+                    if (isNaN(v) || v < 0) { v = 0; }
+                    state.gap[slot] = v;
+                    it.inp.text = String(v);
+                    refresh();
+                };
+                return it;
             }
-            return items;
+
+            nodePool = makeRowPool(createNodeRow);
         }
 
-        // 下拉选择 → 填 4 空 + 更新段状态
-        function addSegRow(si) {
-            var row = grpSegs.add("group");
-            row.orientation = "row";
-            row.alignChildren = ["fill", "center"];
-            row.spacing = 6;
-            segLbl[si] = row.add("statictext", undefined, "");
-            segLbl[si].preferredSize.width = 78;
-            segDd[si] = row.add("dropdownlist", undefined, ddItemsForPresets());
-            segDd[si].preferredSize.width = 92;
-            segIn[si] = [];
-            for (var d = 0; d < 4; d++) {
-                (function (si2, d2) {
-                    var box = row.add("edittext", undefined, "");
-                    box.characters = 4;
-                    bindNumTab(box);   // v0.2.7:Tab 键参与数字框循环
-                    box.onChange = function () {
-                        var seg = ensureCurveSeg(si2);
-                        var n = parseFloat(box.text);
-                        if (isNaN(n)) { n = 0; box.text = String(n); }
-                        if (d2 === 0) { seg.x1 = n; }
-                        else if (d2 === 1) { seg.y1 = n; }
-                        else if (d2 === 2) { seg.x2 = n; }
-                        else { seg.y2 = n; }
-                        syncSegDropdown(si2);   // 手填 → 匹配预设显示名,否则「自定义」
-                    };
-                    segIn[si2].push(box);
-                })(si, d);
-            }
-            segDd[si].onChange = function () {
-                var name = segDd[si].selection.text;
-                if (name === "自定义") { return; }   // 自定义:保留当前数值
-                var idx = presetIndexByName(state.curve.presets, name);
-                if (idx < 0) { return; }
-                var p = state.curve.presets[idx];
-                var seg = ensureCurveSeg(si);
-                seg.preset = p.name;
-                seg.x1 = p.x1; seg.y1 = p.y1; seg.x2 = p.x2; seg.y2 = p.y2;
-                segIn[si][0].text = String(p.x1);
-                segIn[si][1].text = String(p.y1);
-                segIn[si][2].text = String(p.x2);
-                segIn[si][3].text = String(p.y2);
-                syncSegDropdown(si);
+        // 曲线区(v0.3.0 行池化):开关行 + 段列头 + 段行池
+        var segPool = null;
+        function buildCurveArea() {
+            // 曲线功能开关行 + 端点平滑 + 导出/导入(常驻可见,v0.2.2)
+            var grpCurve = pal.add("group");
+            grpCurve.orientation = "row";
+            grpCurve.alignChildren = ["fill", "center"];
+            grpCurve.spacing = 6;
+            var chkCurve = grpCurve.add("checkbox", undefined, "曲线功能");
+            var chkSmooth = grpCurve.add("checkbox", undefined, "端点平滑");
+            var btnExport = grpCurve.add("button", undefined, "导出预设");
+            var btnImport = grpCurve.add("button", undefined, "导入预设");
+            chkCurve.onClick = function () {
+                state.curve.enabled = chkCurve.value;
+                refresh();
+                pal.layout.layout(true);
             };
-            segRows.push(row);
+            chkSmooth.onClick = function () {
+                state.curve.smoothEnd = chkSmooth.value;
+            };
+            btnExport.onClick = exportPresets;
+            btnImport.onClick = importPresets;
+
+            grpSegs = pal.add("group");
+            grpSegs.orientation = "column";
+            grpSegs.alignChildren = ["fill", "top"];
+            grpSegs.spacing = 4;
+
+            // 曲线列头:段 | 预设 | x1 y1 x2 y2
+            var segHead = grpSegs.add("group");
+            segHead.orientation = "row";
+            segHead.alignChildren = ["fill", "center"];
+            segHead.spacing = 6;
+            var sh1 = segHead.add("statictext", undefined, "段");
+            sh1.preferredSize.width = 78;
+            var sh2 = segHead.add("statictext", undefined, "预设");
+            sh2.preferredSize.width = 92;
+            var sh3 = segHead.add("statictext", undefined, "x1");
+            sh3.preferredSize.width = 44;
+            var sh4 = segHead.add("statictext", undefined, "y1");
+            sh4.preferredSize.width = 44;
+            var sh5 = segHead.add("statictext", undefined, "x2");
+            sh5.preferredSize.width = 44;
+            var sh6 = segHead.add("statictext", undefined, "y2");
+            sh6.preferredSize.width = 44;
+
+            // 下拉 items = [自定义] + 全部预设名(v0.2.2:创建行时即全量)
+            function ddItemsForPresets() {
+                var items = ["自定义"];
+                for (var j = 0; j < state.curve.presets.length; j++) {
+                    items.push(state.curve.presets[j].name);
+                }
+                return items;
+            }
+
+            // 单行段:返回 {row, lbl, dd, ins[4]}(v0.3.0 引用分组)
+            function createSegRow(si) {
+                var row = grpSegs.add("group");
+                row.orientation = "row";
+                row.alignChildren = ["fill", "center"];
+                row.spacing = 6;
+                var it = {row: row};
+                it.lbl = row.add("statictext", undefined, "");
+                it.lbl.preferredSize.width = 78;
+                it.dd = row.add("dropdownlist", undefined, ddItemsForPresets());
+                it.dd.preferredSize.width = 92;
+                it.ins = [];
+                for (var d = 0; d < 4; d++) {
+                    (function (d2) {
+                        var box = row.add("edittext", undefined, "");
+                        box.characters = 4;
+                        bindNumTab(box);   // v0.2.7:Tab 键参与数字框循环
+                        box.onChange = function () {
+                            var seg = ensureCurveSeg(si);
+                            var n = parseFloat(box.text);
+                            if (isNaN(n)) { n = 0; box.text = String(n); }
+                            if (d2 === 0) { seg.x1 = n; }
+                            else if (d2 === 1) { seg.y1 = n; }
+                            else if (d2 === 2) { seg.x2 = n; }
+                            else { seg.y2 = n; }
+                            syncSegDropdown(si);   // 手填 → 匹配预设显示名,否则「自定义」
+                        };
+                        it.ins.push(box);
+                    })(d);
+                }
+                it.dd.onChange = function () {
+                    var name = it.dd.selection.text;
+                    if (name === "自定义") { return; }   // 自定义:保留当前数值
+                    var idx = presetIndexByName(state.curve.presets, name);
+                    if (idx < 0) { return; }
+                    var p = state.curve.presets[idx];
+                    var seg = ensureCurveSeg(si);
+                    seg.preset = p.name;
+                    seg.x1 = p.x1; seg.y1 = p.y1; seg.x2 = p.x2; seg.y2 = p.y2;
+                    it.ins[0].text = String(p.x1);
+                    it.ins[1].text = String(p.y1);
+                    it.ins[2].text = String(p.x2);
+                    it.ins[3].text = String(p.y2);
+                    syncSegDropdown(si);
+                };
+                return it;
+            }
+
+            segPool = makeRowPool(createSegRow);
+        }
+
+        // 底部:打帧 + 调试按钮 + 状态栏
+        function buildFooter() {
+            var grpBtns = pal.add("group");
+            grpBtns.orientation = "row";
+            grpBtns.alignChildren = ["fill", "center"];
+            grpBtns.spacing = 6;
+            btnKey = grpBtns.add("button", undefined, "打帧(全部开启的节点)");
+            btnKey.onClick = doKey;
+            var btnDebug = grpBtns.add("button", undefined, "调试");
+            btnDebug.onClick = showReport;
+            status = pal.add("statictext", undefined, "就绪:选中属性 → 设间隔/数值 → 打帧(数值留空=用当前值)");
+            status.alignment = ["fill", "top"];
         }
 
         // 段下拉与当前 4 值同步:匹配预设 → 显示预设名;否则「自定义」
         function syncSegDropdown(si) {
+            var it = segPool.get(si);
+            if (!it) { return; }
             var seg = ensureCurveSeg(si);
             var idx = matchPreset(state.curve.presets, seg.x1, seg.y1, seg.x2, seg.y2);
             if (idx >= 0) {
                 seg.preset = state.curve.presets[idx].name;
-                segDd[si].selection = segDd[si].items[idx + 1];   // items[0] = 自定义
+                it.dd.selection = it.dd.items[idx + 1];   // items[0] = 自定义
             } else {
                 seg.preset = "自定义";
-                segDd[si].selection = segDd[si].items[0];
+                it.dd.selection = it.dd.items[0];
             }
         }
 
-        // 重建全部段下拉 items(导入/导出后调用):自定义 + 全部预设
+        // 重建全部段下拉 items(导入/导出后调用):自定义 + 全部预设(仅已建行)
         function rebuildPresetDropdowns() {
-            for (var i = 1; i <= MAX_COUNT - 1; i++) {
-                if (!segDd[i]) { continue; }
-                var dd = segDd[i];
-                dd.removeAll();
-                dd.add("item", "自定义");
+            for (var i = 0; i < segPool.rows.length; i++) {
+                var it = segPool.rows[i];
+                it.dd.removeAll();
+                it.dd.add("item", "自定义");
                 for (var j = 0; j < state.curve.presets.length; j++) {
-                    dd.add("item", state.curve.presets[j].name);
+                    it.dd.add("item", state.curve.presets[j].name);
                 }
-                syncSegDropdown(i);
+                syncSegDropdown(i + 1);
             }
         }
 
-        // 段行池懒增长(v0.2.2,与节点行 ensureRows 同策略):
-        // 只建到当前需要的段数,不再一次性预建 29 行(145 个原生控件是打开慢的元凶)
-        function ensureSegRows(need) {
-            var added = false;
-            while (segRows.length < need) {
-                addSegRow(segRows.length + 1);
-                added = true;
-            }
-            for (var i = 0; i < segRows.length; i++) {
-                segRows[i].visible = (i + 1) <= need;
-            }
-            return added;
+        // ---------- 刷新(拆分,每块管一件事;refresh 为唯一渲染入口)----------
+
+        // 顶部:表达式行显隐 + 按钮文案(v0.3.0 拆分)
+        function refreshHeader() {
+            grpExpr.visible = (state.vtype === 3);
+            btnKey.text = (state.vtype === 3) ? "应用表达式(选中属性)" : "打帧(全部开启的节点)";
         }
 
-        // 打帧 + 调试按钮
-        var grpBtns = pal.add("group");
-        grpBtns.orientation = "row";
-        grpBtns.alignChildren = ["fill", "center"];
-        grpBtns.spacing = 6;
-        var btnKey = grpBtns.add("button", undefined, "打帧(全部开启的节点)");
-        btnKey.onClick = doKey;
-        var btnDebug = grpBtns.add("button", undefined, "调试");
-        btnDebug.onClick = showReport;
-        var status = pal.add("statictext", undefined, "就绪:选中属性 → 设间隔/数值 → 打帧(数值留空=用当前值)");
-        status.alignment = ["fill", "top"];
-
-        // ---------- 刷新 ----------
-        function refresh() {
+        // 节点行:开关/间隔/数值/时间(v0.3.0 拆分)
+        function refreshNodes() {
             var a = anchorPos(state.mode, state.count);
             var times = computeTimes(state.mode, state.gap, state.on, state.count);
             var dim = (state.vtype === 3) ? 0 : state.vtype + 1;
-            grpExpr.visible = (state.vtype === 3);
-            btnKey.text = (state.vtype === 3) ? "应用表达式(选中属性)" : "打帧(全部开启的节点)";
             for (var s = 1; s <= state.count; s++) {
+                var it = nodePool.get(s);
                 var isAnchor = (s === a);
-                chk[s].visible = !isAnchor;
-                inp[s].visible = !isAnchor;
+                it.chk.visible = !isAnchor;
+                it.inp.visible = !isAnchor;
                 var cells = state.val[s];
                 for (var k = 0; k < 3; k++) {
-                    vin[s][k].visible = (k < dim);
-                    vin[s][k].enabled = isAnchor ? true : state.on[s];
-                    vin[s][k].text = cells[k];   // 直读格子(v0.1.7)
+                    it.vin[k].visible = (k < dim);
+                    it.vin[k].enabled = isAnchor ? true : state.on[s];
+                    it.vin[k].text = cells[k];   // 直读格子(v0.1.7)
                 }
                 if (isAnchor) {
-                    lbl[s].text = "当前时间指示器(锚点)";
-                    tme[s].text = "固定 +0";
+                    it.lbl.text = "当前时间指示器(锚点)";
+                    it.tme.text = "固定 +0";
                 } else {
-                    lbl[s].text = "节点" + s;
-                    chk[s].value = state.on[s];
-                    inp[s].enabled = state.on[s];
-                    inp[s].text = String(state.gap[s]);
-                    tme[s].text = state.on[s] ? fmtFrames(times[s]) : "关闭";
+                    it.lbl.text = "节点" + s;
+                    it.chk.value = state.on[s];
+                    it.inp.enabled = state.on[s];
+                    it.inp.text = String(state.gap[s]);
+                    it.tme.text = state.on[s] ? fmtFrames(times[s]) : "关闭";
                 }
             }
-            // 曲线区(v0.2.2):开关行(checkbox + 导出/导入)常驻可见;
-            // 只有段行区随「开关开启 + 非表达式模式」显隐;段行懒增长
+        }
+
+        // 曲线段行:开关开启且非表达式模式时显示,懒增长 + 填值(v0.3.0 拆分)
+        function refreshCurve() {
             var curveShow = state.curve.enabled && state.vtype !== 3;
             grpSegs.visible = curveShow;
             if (curveShow) {
                 var segList = curveSegments(state.on, state.count);
-                var needNew = ensureSegRows(segList.length);
-                if (needNew) { pal.layout.layout(true); }
+                var added = segPool.ensure(segList.length);
+                if (added) { pal.layout.layout(true); }
                 for (var si = 1; si <= segList.length; si++) {
-                    var srow = segRows[si - 1];
-                    srow.visible = true;
-                    segLbl[si].text = "段" + si + ":节点" + segList[si - 1][0] + "→" + segList[si - 1][1];
+                    var it = segPool.get(si);
+                    it.lbl.text = "段" + si + ":节点" + segList[si - 1][0] + "→" + segList[si - 1][1];
                     var seg = ensureCurveSeg(si);
-                    segIn[si][0].text = String(seg.x1);
-                    segIn[si][1].text = String(seg.y1);
-                    segIn[si][2].text = String(seg.x2);
-                    segIn[si][3].text = String(seg.y2);
+                    it.ins[0].text = String(seg.x1);
+                    it.ins[1].text = String(seg.y1);
+                    it.ins[2].text = String(seg.x2);
+                    it.ins[3].text = String(seg.y2);
                     syncSegDropdown(si);
                 }
             } else {
-                // 曲线关/表达式模式:隐藏已建的段行
-                for (var hi = 0; hi < segRows.length; hi++) { segRows[hi].visible = false; }
+                segPool.hideAll();   // 曲线关/表达式模式:隐藏已建的段行
             }
         }
 
-        // 模式切换
-        ddMode.onChange = function () {
-            state.mode = ddMode.selection.index;
-            refresh();
-            pal.layout.layout(true);
-        };
+        // 唯一渲染入口:顶部 → 节点 → 曲线
+        function refresh() {
+            refreshHeader();
+            refreshNodes();
+            refreshCurve();
+        }
 
-        // 数值类型切换
-        ddType.onChange = function () {
-            state.vtype = ddType.selection.index;
-            refresh();
-            pal.layout.layout(true);
-        };
-
-        ensureRows();
-        refresh();   // 曲线段行懒增长:refresh() 里按需建(不再一次性预建 29 行)
+        // ---------- 初始化 ----------
+        buildHeader();
+        buildNodeArea();
+        buildCurveArea();
+        buildFooter();
+        nodePool.ensure(state.count);
+        refresh();   // 曲线段行懒增长:refresh() 里按需建
 
         if (pal instanceof Window) { pal.center(); pal.show(); }
         else { pal.layout.layout(true); }

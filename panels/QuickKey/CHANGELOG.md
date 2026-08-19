@@ -1,5 +1,51 @@
 # 更新日志(CHANGELOG)
 
+## v0.3.0(2026-08-19)— UI 层重构(阶段 1:主线):行池工厂 + 构建分块 + 刷新拆分
+
+- 用户要求按"最好优化效果"重构,先主线后支线;程序量小风险可控
+- 纯逻辑层 / 预检层 / 执行层 **一行未动**(上次重构成果健康),只重组 UI 层:
+  - **行池工厂 `makeRowPool`**:统一两套"懒增长 + visible 切换"(原 addRow/ensureRows
+    vs addSegRow/ensureSegRows 重复模式消除)
+  - **构建分块**:buildHeader(节点数/模式/数值类型/表达式)/
+    buildNodeArea(节点行池)/ buildCurveArea(曲线开关+段行池)/ buildFooter(按钮+状态栏)
+  - **刷新拆分**:refresh = refreshHeader + refreshNodes + refreshCurve(原 refresh
+    干 4 件事 → 每块管一件事)
+  - **控件引用分组**:行对象 {row, chk, lbl, inp, vin, tme} / {row, lbl, dd, ins},
+    取代分散的平行对象(chk/lbl/inp/vin/tme + segLbl/segDd/segIn)
+- 行为零变化:116 断言全过(纯逻辑未动);事件全部保持"瘦处理器 → state → refresh"单向流
+- 语法 ✓ BOM ✓ 已部署;**待真机验证主线**(重启 AE 全功能回归)
+- 阶段 2(支线:表达式/导出导入/调试)等主线验证后再动
+
+## v0.2.16(2026-08-19)— 修复 2D 属性曲线报「值数组没有 1 元素」:SPATIAL 缓动数组规则
+
+- 用户实测:1 个空(旋转)曲线正常,2 个空(锚点,2D_SPATIAL)报
+  「由于参数 2,无法调用 setTemporalEaseAtKey。值数组没有 1 元素」
+- 搜索官方指南(manualslib Adobe CS3 Guide p147)确认规则:
+  **setTemporalEaseAtKey 数组长度取决于 keyframeValueType——ThreeD→3、
+  TwoD→2、"all other keyframeValueTypes, **including TwoD_SPATIAL and
+  ThreeD_SPATIAL, it is 1**"**;Paul Tuersley 社区确认 Position 只有一组速度缓动
+- 根因:easeArr 长度用了 propDimOf(锚点 2D 返回 2),而 SPATIAL 属性
+  (位置/锚点/方向)AE 只收 **1 个** KeyframeEase → 2 个被拒
+- 修复:新增 **`easeDimOf(prop, v)`**——SPATIAL(matchName 判断)恒 1;
+  缩放等非空间按实际写入值 v 的维度(2D→2、3D→3);不依赖 propertyValueType
+  (AE 2026 的 2D 变换属性也报 3D 类型)
+- mock 新增 4 项断言(锚点 eiLen=1、缩放 eiLen=2),114 断言全过;语法 ✓ BOM ✓ 已部署
+
+## v0.2.15(2026-08-19)— 端点平滑开关:曲线两端「硬 / 平滑」可选
+
+- 用户反馈:曲线序列首帧/末帧端点是"硬的"(起点直接有速度、终点或被跳过
+  保持 LINEAR 直线角),想要开关选「硬 / 平滑」
+- 确认语义(用户选择):**平滑 = 两端速度归零**——起点从静止加速、终点减速
+  静止,曲线两端水平圆润(像 Easy Ease);硬 = 现状
+- 实现:曲线功能行新增「端点平滑」checkbox(常驻可见);applySegCurves
+  加第 4 参 smoothEnd——
+  - 平滑:首段「出」/末段「入」速度强制 0;端点邻接线性段时线性端点速度
+    也置 0;首/末帧即使两侧段都线性也不跳过(转 BEZIER)
+  - 硬(默认):行为完全不变
+- mock 新增 5 项断言:全线性+平滑(帧1/3 转 BEZIER 速度 0、帧2 保持 LINEAR)、
+  全缓入缓出+平滑(与硬一致,端点速度本就 0);110 断言全过
+- 语法 ✓ BOM ✓ 已部署
+
 ## v0.2.14(2026-08-19)— 修复线性段端点被"僵直"变形(线性 = 匀速,非速度 0)
 
 - 用户实测:曲线段(如缓入缓出)后面跟线性段时,曲线段的末帧端点被强行变形、不自由
