@@ -1168,7 +1168,9 @@
 
         // ────── 动效整理(v0.3.3):对象 + 节点/曲线竖排,便于核对当前动效 ──────
         report.push("");
-        report.push("────── 动效整理 ──────");
+        // v0.3.8:标题标注工程帧率(毫秒换算依据;29.97/23.976 等非整帧率如实显示)
+        var fpsTxt = "" + Math.round((1 / comp.frameDuration) * 1000) / 1000;
+        report.push("────── 动效整理 (" + fpsTxt + "fps) ──────");
         // 对象行:每个选中属性一行(合成 · 图层 · 属性名 · 维度)
         for (var oi = 0; oi < props.length; oi++) {
             var objDesc = "「" + comp.name + "」";
@@ -1190,7 +1192,13 @@
         for (var d2 = 0; d2 < disp.length; d2++) {
             var nd = disp[d2];
             var nt = comp.time + nd.offset * comp.frameDuration;
-            report.push("节点" + nd.slot + "  " + nt.toFixed(2) + "s  (" + fmtFrames(nd.offset) + ")   值 "
+            // v0.3.8:节点行帧偏移追加毫秒(按工程帧率换算;锚点 +0 帧不显示)
+            var offTxt = "(" + fmtFrames(nd.offset) + ")";
+            if (nd.offset !== 0) {
+                offTxt = "(" + fmtFrames(nd.offset) + " / "
+                    + Math.round(nd.offset * comp.frameDuration * 1000) + "ms)";
+            }
+            report.push("节点" + nd.slot + "  " + nt.toFixed(2) + "s  " + offTxt + "   值 "
                 + ((nd.kind === "empty") ? "当前值" : describeVal(nd.value)));
             // 该节点与下一个节点之间的曲线段(段序 = 打帧节点序,正常情况与面板段一一对应)
             if (d2 < disp.length - 1 && segMeta && segMeta[d2]) {
