@@ -1,6 +1,6 @@
 ﻿// ============================================================
 // QuickKey · 节点式 K 帧排程面板  QuickKey.jsx
-// 版本: 0.2.13  (2026-08-19)
+// 版本: 0.2.14  (2026-08-19)
 // 适用: After Effects CC 2015.3+ (依赖 selectedProperties API)
 //
 // 以当前时间指示器为锚点,按节点排程给选中属性批量打关键帧;
@@ -26,10 +26,11 @@
 //   - 曲线段 = 开启节点的相邻对;总开关常驻可见,段行区随开关显隐
 //   - 维度判断:变换属性以图层 threeDLayer 开关为准(AE 2026 的 2D 变换
 //     属性 value/propertyValueType 都报 3D,勿用这两者判断)
-//   - 曲线套用(v0.2.12 重写):打帧用 setKeyAt(addKey 创建即得索引);
-//     逐段 bezierToEase(公式集中一处)→ 逐帧先转 BEZIER 插值再
-//     setTemporalEaseAtKey(缓动参数是【数组】,1D/2D/3D = 1/2/3 个);
-//     线性段两侧缓动置中性,两侧都中性才跳过
+//   - 曲线套用(v0.2.12 重写 / 0.2.14 修线性端点):打帧用 setKeyAt
+//     (addKey 创建即得索引);逐段 bezierToEase(公式集中一处)→ 逐帧先转
+//     BEZIER 插值再 setTemporalEaseAtKey(缓动参数是【数组】,1D/2D/3D = 1/2/3 个);
+//     线性段端点缓动 = 段平均速度(线性 = 匀速,严禁速度 0——会僵直相邻曲线段);
+//     帧两侧段都线性(或边界无段)才跳过,保持 AE 默认线性
 //   - ExtendScript 雷区:禁写含双反斜杠的正则字面量(语法错误);
 //     JSON 非原生内置,必须用自带迷你 JSON
 //   - 打帧目标 = selectedProperties;整次操作一个 Undo 组(Ctrl+Z 整体撤销)
@@ -652,18 +653,19 @@
         return idx;
     }
 
-    // 给一个属性的关键帧序列套缓动曲线(v0.2.12 重写,逻辑梳理):
+    // 给一个属性的关键帧序列套缓动曲线(v0.2.12 重写,0.2.14 修线性端点):
     //   frames = [{t, v, idx}] 按时间升序;idx 来自打帧时 setKeyAt 的 addKey 返回值
     //   segs   = 每段 {x1,y1,x2,y2}(长度 m-1,bezier 0~1)
     // 流程:
     //   1. 逐段 bezierToEase(avg = 段值差/时差)→ 每段的入/出缓动
     //   2. 帧 k 的「出」= 段 k 的「出」,帧 k+1 的「入」= 段 k 的「入」;
     //      首帧「入」/末帧「出」= NEUTRAL
-    //   3. 两侧都中性的帧跳过(保持 AE 默认线性);否则先转 BEZIER 插值再设缓动
-    //      (setValueAtTime/addKey 打的帧默认 LINEAR 插值,直接设缓动不生效)
-    //   4. setTemporalEaseAtKey 缓动参数是【数组】(1D=1/2D=2/3D=3,按 propDimOf)
-    // 返回 {applied, missed, missIdx, missErr, missErrMsg}:
-    //   missIdx = 帧索引无效/找不到;missErr = 调用抛错(带回首个错误文本)
+    //   3. 线性段端点缓动 = KeyframeEase(段平均速度, 0.1)——线性 = 匀速
+    //      (官方文档 "uniform rate of change"),速度必须 = 段平均速度;
+    //      原 NEUTRAL 速度 0 会把相邻曲线段的端点"僵直"变形(v0.2.14 真机 bug)
+    //   4. 帧两侧都属于线性段(或边界无段)→ 跳过,保持 AE 默认线性插值;
+    //      否则先转 BEZIER 插值再设缓动(setTemporalEaseAtKey 参数是【数组】)
+    // 返回 {applied, missed, missIdx, missErr, missErrMsg}
     function applySegCurves(prop, frames, segs) {
         var m = frames.length;
         var EMPTY = {applied: 0, missed: 0, missIdx: 0, missErr: 0, missErrMsg: ""};
@@ -675,8 +677,7 @@
             for (var d = 0; d < dim; d++) { arr.push(e); }
             return arr;
         }
-        var NEUTRAL = new KeyframeEase(0, 0.1);   // influence 下限 0.1(官方 [0.1..100])
-        // 逐帧的入/出缓动(inEase[1] = 帧1入 = 中性;outEase[m] = 帧m出 = 中性)
+        // 每段端点缓动:outEase[j] = 帧 j 出(段 j 出);inEase[j+1] = 帧 j+1 入(段 j 入)
         var inEase = [];
         var outEase = [];
         var j;
@@ -686,13 +687,14 @@
             var avg = (dt > 0.000001) ? valDiff(frames[j].v, frames[j - 1].v) / dt : 0;
             var conv = sg ? bezierToEase(sg.x1, sg.y1, sg.x2, sg.y2, avg) : null;
             if (conv) {
-                outEase[j] = new KeyframeEase(conv.out.speed, conv.out.influence);   // 帧 j 出
-                inEase[j + 1] = new KeyframeEase(conv.inE.speed, conv.inE.influence); // 帧 j+1 入
+                outEase[j] = new KeyframeEase(conv.out.speed, conv.out.influence);
+                inEase[j + 1] = new KeyframeEase(conv.inE.speed, conv.inE.influence);
             } else {
-                outEase[j] = NEUTRAL;
-                inEase[j + 1] = NEUTRAL;
+                outEase[j] = new KeyframeEase(avg, 0.1);    // 线性 = 匀速(0.2.14)
+                inEase[j + 1] = new KeyframeEase(avg, 0.1);
             }
         }
+        var NEUTRAL = new KeyframeEase(0, 0.1);   // 仅用于边界:首帧入 / 末帧出
         var applied = 0;
         var missed = 0;
         var missIdx = 0;
@@ -701,9 +703,14 @@
         for (var k = 1; k <= m; k++) {
             var idx = frames[k - 1].idx;
             if (!idx || idx <= 0) { missed++; missIdx++; continue; }
-            var inE = inEase[k] || NEUTRAL;
-            var outE = outEase[k] || NEUTRAL;
-            if (inE === NEUTRAL && outE === NEUTRAL) { continue; }
+            // 帧两侧段:入侧 = 段 k-1,出侧 = 段 k;边界无段视为线性
+            var segL = (k > 1) ? segs[k - 2] : null;
+            var segR = (k < m) ? segs[k - 1] : null;
+            var linL = !segL || isLinearPreset(segL.x1, segL.y1, segL.x2, segL.y2);
+            var linR = !segR || isLinearPreset(segR.x1, segR.y1, segR.x2, segR.y2);
+            if (linL && linR) { continue; }   // 两侧都线性 → 保持 AE 默认线性插值
+            var inE = (k > 1) ? inEase[k] : NEUTRAL;
+            var outE = (k < m) ? outEase[k] : NEUTRAL;
             try {
                 prop.setInterpolationTypeAtKey(idx,
                     KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);

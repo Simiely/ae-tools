@@ -273,7 +273,7 @@ eq("applySegCurves 缓入+线性 applied=2", r3.applied, 2);
 eq("applySegCurves 缓入+线性 插值 1/2(帧3 线性跳过)", mp3.log.interp, [1, 2]);
 eq("applySegCurves 缓入+线性 ease(帧3 线性不被污染)", mp3.log.ease, [
     {idx: 1, eiLen: 1, eiInf: 0.1, eiSpd: 0, eoLen: 1, eoInf: 42, eoSpd: 0},    // 帧1:出影响 42
-    {idx: 2, eiLen: 1, eiInf: 0.1, eiSpd: 100, eoLen: 1, eoInf: 0.1, eoSpd: 0}  // 帧2:入=x2=1→影响0.1/速度退avg
+    {idx: 2, eiLen: 1, eiInf: 0.1, eiSpd: 100, eoLen: 1, eoInf: 0.1, eoSpd: 100} // 帧2:入=x2=1→影响0.1/速度退avg;出=线性段匀速(avg=100, v0.2.14)
 ]);
 var mp4 = mockProp();
 var r4 = QK.applySegCurves(mp4, F3, [
@@ -282,7 +282,7 @@ var r4 = QK.applySegCurves(mp4, F3, [
 ]);
 eq("applySegCurves 线性+缓入 applied=2", r4.applied, 2);
 eq("applySegCurves 线性+缓入 ease(帧1 不动)", mp4.log.ease, [
-    {idx: 2, eiLen: 1, eiInf: 0.1, eiSpd: 0, eoLen: 1, eoInf: 42, eoSpd: 0},     // 帧2:出=段2 出影响 42
+    {idx: 2, eiLen: 1, eiInf: 0.1, eiSpd: 100, eoLen: 1, eoInf: 42, eoSpd: 0},     // 帧2:入=线性段匀速(avg=100,v0.2.14);出=段2 出影响 42
     {idx: 3, eiLen: 1, eiInf: 0.1, eiSpd: 100, eoLen: 1, eoInf: 0.1, eoSpd: 0}  // 帧3:入=x2=1→影响0.1/速度退avg
 ]);
 var mp5 = mockProp();
