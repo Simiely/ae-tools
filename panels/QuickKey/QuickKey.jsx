@@ -7,7 +7,7 @@
 // 曲线功能为每段套 cubic-bezier 缓动;预设可导出/导入 JSON。
 //
 // 代码地图(用函数名定位,行号会随编辑漂移):
-//   纯逻辑层(node 可测,test_quickkey.js 155 断言):
+//   纯逻辑层(node 可测,test_quickkey.js 158 断言):
 //     排程: anchorPos / computeTimes / classifyValue / buildPlan / planHasExplicit
 //     曲线: matchPreset / curveSegments / mergePresets / validatePresets /
 //            isLinearPreset / bezierToEase / valDiff / valSignedDiff(v0.3.7)
@@ -386,18 +386,49 @@
         return String(n);
     }
 
-    // presets 数组 → 标准 JSON 文本(美观缩进,方便用户手编)
-    function stringifyPresets(presets) {
-        var parts = [];
+    // 内置预设名判断(v0.3.9,导出分组用:内置一组、导入一组,组间空行)
+    function isBuiltinPresetName(n) {
+        for (var i = 0; i < PRESETS_DEFAULT.length; i++) {
+            if (PRESETS_DEFAULT[i].name === n) { return true; }
+        }
+        return false;
+    }
+
+    // 预设列表格式化(v0.3.9):每条预设单行(名称 + 4 数值),内置/导入组间空行。
+    // 返回 "presets" 数组内部的文本行(缩进 4 空格),供 stringifyPresets /
+    // stringifyConfig 复用——保证两份导出里预设段的格式一致
+    function presetBodyLines(presets) {
+        var lines = [];
+        var lastB = true;
         for (var i = 0; i < presets.length; i++) {
             var p = presets[i];
-            parts.push('{\n    "name": ' + jsonStr(String(p.name))
-                + ',\n    "x1": ' + jsonNum(p.x1)
-                + ',\n    "y1": ' + jsonNum(p.y1)
-                + ',\n    "x2": ' + jsonNum(p.x2)
-                + ',\n    "y2": ' + jsonNum(p.y2) + "\n  }");
+            var isB = isBuiltinPresetName(String(p.name));
+            if (i > 0 && lastB && !isB) { lines.push(""); }   // 内置 → 导入,空行分段
+            lastB = isB;
+            var line = '    { "name": ' + jsonStr(String(p.name))
+                + ', "x1": ' + jsonNum(p.x1)
+                + ', "y1": ' + jsonNum(p.y1)
+                + ', "x2": ' + jsonNum(p.x2)
+                + ', "y2": ' + jsonNum(p.y2) + ' }';
+            if (i < presets.length - 1) { line += ","; }      // 元素间逗号(标准 JSON)
+            lines.push(line);
         }
-        return '{\n  "version": 1,\n  "presets": [\n  ' + parts.join(",\n  ") + "\n  ]\n}";
+        return lines;
+    }
+
+    // presets 数组 → 标准 JSON 文本(v0.3.9 可读性优化):
+    //   每条单行、内置/导入组间空行、顶层 _comment 字段说明含义。
+    //   仍是标准 JSON(node/JSON.parse 可直接读),解析端忽略 _comment;
+    //   用户可直接编辑该文件后重新导入(同名覆盖、新名追加)
+    function stringifyPresets(presets) {
+        var body = presetBodyLines(presets).join("\n");
+        if (body === "") { body = "  "; }
+        return '{\n'
+            + '  "version": 1,\n'
+            + '  "_comment": ' + jsonStr("QuickKey 曲线预设文件:每条 = name / x1 / y1 / x2 / y2,"
+                + "为 cubic-bezier 缓动控制点(x1/y1 起点手柄、x2/y2 终点手柄;线性 = 0 0 1 1)。"
+                + "可直接编辑后重新导入,同名覆盖、新名追加。") + ',\n'
+            + '  "presets": [\n' + body + '\n  ]\n}';
     }
 
     // 在 "{...}" 块内提取字符串键值(name):返回解码后的字符串,找不到返回 null
@@ -646,13 +677,35 @@
         return "null";
     }
 
-    // 配置对象 → JSON 文本(当前参数 + 曲线库 + 4 槽位,空槽位 = {})
+    // 配置对象 → JSON 文本(v0.3.9 可读性优化:分段 + 单行对象 + _comment 备注)。
+    // 当前参数一行一个、曲线库单行+分组、槽位单行;仍是标准 JSON(解析端忽略
+    // _comment),用户可直接编辑后重新导入(导入 = 应用参数 + 合并曲线库 + 载入槽位)
     function stringifyConfig(params, presets, slots) {
-        var cfg = {version: 1};
-        for (var k in params) { cfg[k] = params[k]; }
-        cfg.presets = presets || [];
-        cfg.slots = slots || [{}, {}, {}, {}];
-        return jsonStringify(cfg);
+        var out = [];
+        out.push('{\n  "version": 1,');
+        out.push('  "_comment": ' + jsonStr("QuickKey 全参数配置:当前面板全部参数 + 曲线预设库 + 4 个槽位,"
+            + "导入后完整还原。参数含义:mode 模式(0 起始/1 中间/2 末尾)、count 节点数、"
+            + "vtype 数值类型、expr 表达式、on 节点开关串、gap 间隔(帧)、val 节点数值、"
+            + "curveEnabled 曲线总开关、curveSmoothEnd 端点平滑、curveSeg 曲线段。"
+            + "可直接编辑后重新导入。") + ',');
+        var keys = ["mode", "count", "vtype", "expr", "on", "gap", "val",
+                    "curveEnabled", "curveSmoothEnd", "curveSeg"];
+        for (var i = 0; i < keys.length; i++) {
+            var k = keys[i];
+            if (params.hasOwnProperty(k) && params[k] !== undefined) {
+                out.push('  ' + jsonStr(k) + ': ' + jsonStringify(params[k]) + ',');
+            }
+        }
+        var pbody = presetBodyLines(presets || []).join("\n");
+        if (pbody === "") { pbody = "    "; }
+        out.push('  "presets": [\n' + pbody + '\n  ],');
+        out.push('  "slots": [');
+        var sarr = slots || [{}, {}, {}, {}];
+        for (var s = 0; s < 4; s++) {
+            out.push('    ' + jsonStringify(sarr[s]) + (s < 3 ? "," : ""));
+        }
+        out.push('  ]\n}');
+        return out.join("\n");
     }
 
     // 从文本块提取扁平参数(手写兜底用;无任何字段返回 null = 空槽位)

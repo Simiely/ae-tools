@@ -209,6 +209,12 @@ eq("stringifyPresets 含字段", (PEX_JSON.indexOf('"name": "线性"') >= 0
 eq("stringifyPresets 是标准 JSON(node 可解析)", JSON.parse(PEX_JSON).presets.length, 2);
 eq("parsePresetsText round-trip(node 走 JSON 分支)", QK.parsePresetsText(PEX_JSON), PEX);
 eq("extractPresetsFallback 手写分支", QK.extractPresetsFallback(PEX_JSON), PEX);
+// v0.3.9:可读性优化——顶层 _comment 备注 + 内置/导入组间空行,仍是标准 JSON
+eq("stringifyPresets 含 _comment 备注", PEX_JSON.indexOf('"_comment"') >= 0, true);
+var mLin = PEX_JSON.indexOf('"name": "线性"');
+var mBoun = PEX_JSON.indexOf('"name": "回弹"');
+eq("stringifyPresets 内置/导入组间空行", (mLin >= 0 && mBoun > mLin
+    && PEX_JSON.substring(mLin, mBoun).indexOf("\n\n") >= 0), true);
 eq("extractPresetsFallback 空 → null", QK.extractPresetsFallback("no json here"), null);
 eq("extractPresetsFallback 过滤非法", QK.extractPresetsFallback(
     '{"presets": [{"name":"ok","x1":0,"y1":0,"x2":1,"y2":1},'
@@ -525,6 +531,7 @@ eq("decodeSeg 非法行过滤", QK.decodeSeg("线性,0,0,1,1|x"), [{preset: "线
 var slotsArr = [cA, {}, cA, {}];
 var cfgJson = QK.stringifyConfig(cA, [{name: "弹", x1: 0.2, y1: 1.4, x2: 0.7, y2: 0.6}], slotsArr);
 eq("stringifyConfig 是标准 JSON", (JSON.parse(cfgJson).version === 1), true);
+eq("stringifyConfig 含 _comment 备注", cfgJson.indexOf('"_comment"') >= 0, true);
 var cfgParsed = QK.parseConfigText(cfgJson);
 eq("parseConfigText params 一致", JSON.stringify(cfgParsed.params) === JSON.stringify(cA), true);
 eq("parseConfigText slots 槽位2 为空", JSON.stringify(cfgParsed.slots[1]), "{}");
@@ -536,5 +543,5 @@ eq("extractParamsFromBlock 空块 → null", QK.extractParamsFromBlock(""), null
 var slotsTxt = '{"slots":[{"mode":0},{"mode":1},{},{}]}';
 eq("extractSlotsFallback 顺序+空槽", JSON.stringify(QK.extractSlotsFallback(slotsTxt)), JSON.stringify([{mode: 0}, {mode: 1}, {}, {}]));
 
-console.log(failures === 0 ? "ALL PASS (" + 155 + " assertions)" : failures + " FAILURES");
+console.log(failures === 0 ? "ALL PASS (" + 158 + " assertions)" : failures + " FAILURES");
 process.exit(failures === 0 ? 0 : 1);

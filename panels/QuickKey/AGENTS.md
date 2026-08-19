@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**:2026-08-19(v0.3.8)
+> 📌 **文档基线**:2026-08-19(v0.3.9)
 > **更新文档/代码后,请更新此行**(日期 + 新 commit hash),并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
@@ -85,7 +85,7 @@
 
 ## 常用命令
 
-- 回归测试:`node test_quickkey.js`(155 项断言,改纯逻辑层函数必须跑)
+- 回归测试:`node test_quickkey.js`(158 项断言,改纯逻辑层函数必须跑)
 - 语法检查:`cp QuickKey.jsx _check.js && node --check _check.js && rm _check.js`
 - 补 BOM:Python 前插 `b'\xef\xbb\xbf'`
 - 部署:`python install.py`(ae-tools 根目录,自动检测 AE 版本 + BOM + 字节校验)

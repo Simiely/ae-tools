@@ -2,6 +2,39 @@
 
 > 一坑一篇,按时间倒序。只记录"代码里看不出的信息"。
 
+## v0.3.9(2026-08-19)— 导出文件可读性优化:单行 + 分组 + 备注(仍是标准 JSON)
+
+### 起因
+
+用户反馈:导出 JSON 每条预设多行嵌套可读性差(且用户会手动编辑后重新导入),
+要求"适当的段行和备注"。
+
+### 方案(关键约束:保持标准 JSON)
+
+- JSON 标准**不支持注释**——"备注"用顶层 `_comment` 字段实现,合法且解析端忽略
+  (validatePresets / parseConfigText 只取已知键,`_comment` 天然被跳过)
+- "段行"用数组元素间**空行**实现(JSON 规范允许任意空白)
+- 分组依据:内置预设名集合 `PRESETS_DEFAULT`(isBuiltinPresetName),导出时
+  内置一组、导入一组,组间空行
+- 每条预设压缩为单行 `{ "name": ..., "x1": ..., ... }`,配置参数一行一个
+
+### 踩坑(本次真机测试暴露)
+
+1. 重写 `stringifyPresets` 时**忘了在数组元素间加逗号**(原版用
+   `parts.join(",\n  ")` 隐式加逗号,新版逐行 push 漏掉)→ 导出文件
+   `JSON.parse` 报 "Expected ',' or ']' after array element"。
+   **教训:手写 JSON 拼接后必须用 JSON.parse 验证 round-trip 再发布**——
+   presetBodyLines 在非末行元素后补逗号
+2. `_comment` 文案必须避开:花括号(会干扰手写提取的块扫描)、带引号的键名
+   (grabStr/grabNum 按 `"key"` 匹配)、数字键形式(干扰 extractPresetsFallback)
+   ——文案统一用 `name / x1 / y1 / x2 / y2` 无引号表述
+
+### 验证
+
+- 测试 155 → 158 断言(_comment 存在 + 内置/导入分组空行);全部通过
+- 手写提取回退路径(extractPresetsFallback / extractParamsFromBlock)对新格式
+  兼容——已由既有断言覆盖(extractPresetsFallback 手写分支仍 == PEX)
+
 ## v0.3.8(2026-08-19)— 动效整理报告:节点行毫秒 + 标题帧率标注
 
 ### 需求
