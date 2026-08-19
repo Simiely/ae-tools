@@ -2,6 +2,286 @@
 
 > 一坑一篇,按时间倒序。只记录"代码里看不出的信息"。
 
+## v0.2.13(2026-08-19)— 真机「非法使用保留字」:对象属性名不能用 in
+
+### 起因
+
+v0.2.12 重写后真机报「在行 237 无法执行脚本。非法使用保留字」。
+行 237 = `bezierToEase` 的返回对象字面量 `{out: ..., in: ...}`。
+
+### 根因
+
+`in` 是 ECMA-262 v3 的保留字(运算符)。ExtendScript 的解析器
+**不允许保留字作为对象字面量属性名**(报「非法使用保留字」);
+而 node(V8 现代引擎)允许,所以 `node --check` 和测试全绿,
+真机一跑就崩——与 v0.2.1 正则 `\\` 同一类"node 通过但 AE 崩"。
+
+### 修复与防护
+
+1. `in:` → `inE:`,同步 applySegCurves 调用处与测试期望(105 断言全过)
+2. AGENTS 坑 18 扩为三个雷,附 grep 检查命令:
+   `(?:[{,]\s*)(in|new|var|default|...)`——新增对象字面量后必扫
+3. 教训:ES3 兼容代码的对象属性名要避开全部保留字,**不要依赖
+   node --check 做 ES3 合规性检查**(它只保证 V8 语法)
+
+## v0.2.12(2026-08-19)— 曲线逻辑重写:三层职责分离
+
+### 起因
+
+曲线功能从 v0.2.0 到 v0.2.11 打了 8 轮补丁(插值/线性污染/数组参数/
+influence 范围/公式修正/索引诊断/addKey),`applySegCurves` 的注释堆到
+28 行、转换公式内联、缓动数组用"段下标 + 换算"组织,用户明确要求
+"梳理好逻辑,直接重写"。
+
+### 重写后结构(行为零变化,全部既有 mock 用例等价通过)
+
+```
+bezierToEase(x1,y1,x2,y2,avg)   ← 纯函数层(新):公式集中一处
+   线性 → null;非线性 → {out:{speed,influence}, in:{speed,influence}}
+     出影响 = x1×100;入影响 = (1−x2)×100(钳 0.1~100,取整 1 位)
+     出速度 = y1×avg/x1;入速度 = (1−y2)×avg/(1−x2)(除零退 avg)
+
+applySegCurves(prop, frames, segs)   ← AE 层:只做组装
+   逐段 bezierToEase → 按【帧索引】直存 inEase[k]/outEase[k]:
+     帧 k 出 = 段 k 出;帧 k+1 入 = 段 k 入;首帧入/末帧出 = NEUTRAL
+   逐帧:两侧都中性跳过;否则 BEZIER 插值 + setTemporalEaseAtKey(数组)
+   统计 {applied, missed, missIdx, missErr, missErrMsg} 不变
+
+setKeyAt(prop, t, wv)   ← 打帧层(v0.2.11 不动):addKey 创建即得索引
+```
+
+### 关键收获
+
+1. **补丁越多越要回头重写**:8 轮补丁的正确结论(公式/数组/范围/索引)
+   全部保留,但组织方式从"叠注释"变成"分层函数",可读性质变
+2. 缓动数组按帧索引直存(inEase[k]/outEase[k])比按段下标(easeIn[j])
+   + 换算(k-1/k)直观得多,且行为完全一致——重写时用"行为等价 +
+   mock 全绿"验证
+3. 转换公式抽成纯函数后,4 项新断言直接守护(缓入缓出/线性/缓入/缓出),
+   以后改公式不用再靠真机
+
+## v0.2.11(2026-08-19)— 打帧改 addKey:创建即得索引,消灭"打完再找"
+
+### 起因
+
+v0.2.10 细分诊断生效,真机报告「3 帧未匹配(3 索引无效)」——锁定是
+"打帧后按时间找关键帧索引"环节全部失败(手写循环 + nearestKeyIndex
+兜底均未命中),而非缓动调用异常。
+
+### 搜索结论(可信依据)
+
+1. **官方文档**:`Property.addKey(time)` "Adds a new keyframe or marker
+   to the named property at the specified time and **returns the index
+   of the new keyframe**"(返回新帧索引)——创建即得,无需事后查找
+2. **Adobe 社区(Paul Tuersley,脚本大神)确认**:AE 关键帧放置存在已知
+   精度问题,脚本打出的帧可能落在"帧与帧之间"——按时间匹配找索引天然不可靠
+
+### 修复
+
+`setKeyAt(prop, t, wv)` 取代 `setValueAtTime + findKeyIndex`:
+1. 先按时间找已有帧(容差 0.03→0.05s)复用其索引(连续打帧不产生重复帧)
+2. 无已有帧 → `addKey(t)` 直接拿索引(官方返回)
+3. `setValueAtKey(idx, wv)` 设值
+4. addKey 异常兜底 `setValueAtTime + numKeys`(极端,帧仍打上)
+
+索引从"查找"变"创建即得",曲线应用直接用 addKey 返回的索引——理论上
+missIdx 归零。mock 升级:numKeys/keyframeTime/addKey/setValueAtKey 模拟
++ 6 项新断言(无帧 addKey / 已有帧复用 / keyframeTime 抛错兜底),101 断言。
+
+### 待真机验证
+
+- 若曲线套上(报告「N 帧套上缓动」)→ 闭环,可推
+- 若仍「索引无效」→ addKey 在 AE 2026 返回 0/异常,需进一步查
+  (报告自带 missIdx/missErr 细分,可继续收敛)
+
+## v0.2.10(2026-08-19)— 曲线"未匹配"细分诊断 + nearestKeyIndex 兜底
+
+### 起因
+
+真机报告「曲线应用: 0 帧套上缓动 · 3 帧未匹配」(相比 v0.2.8 的"1 个属性异常"有进展:
+KeyframeEase 构造已通过,卡在逐帧设置环节)。此时 setInterpolationTypeAtKey /
+setTemporalEaseAtKey 签名均已对照官方文档确认合法,索引记录逻辑看起来也对,
+但 3 帧全 missed——无法从代码推理定位,决定加诊断让真机数据说话。
+
+### 做法
+
+1. `findKeyIndex` 手写循环未命中时,用官方 `nearestKeyIndex(t)` 兜底
+   (Property 专为"按时间找最近关键帧"设计,官方实现处理边界;手写循环
+   容差逻辑理论上必中,兜底防 AE 版本行为差异)
+2. `applySegCurves` 的 missed 细分:
+   - `missIdx`: frames[k].idx 为 0/undefined(打帧后索引记录失败)
+   - `missErr`: setInterpolationTypeAtKey / setTemporalEaseAtKey 抛错
+     (try/catch 吞掉,带回首个错误文本)
+3. 报告显示「未匹配(3 索引无效)」或「未匹配(3 调用异常)[错误信息]」
+
+### 结论待真机验证
+
+- 若报「索引无效」→ findKeyIndex/nearestKeyIndex 都没命中,需检查
+  AE 2026 的 numKeys/keyframeTime 行为
+- 若报「调用异常」+ 错误文本 → AE 侧 API 行为差异(如 KeyframeEase
+  speed 负值/超范围),错误文本直接给出线索
+- mock 测试新增 failEase 抛错模式,95 断言
+
+## v0.2.4(2026-08-18)— 核验发现:线性段缓动污染(mock 模拟执行)
+
+### 起因
+
+用户「还没试,先核验」——不靠真机,直接把 applySegCurves 放进 node 测试,
+mock KeyframeEase / KeyframeInterpolationType / prop 对象,逐帧核对调用序列。
+
+### 发现的 bug
+
+近似公式「入影响 = y2×100%」对**线性段(0 0 1 1)算出 100 影响**(y2=1),而
+线性段的入影响应为 0。内置 4 个预设的 y2 **全是 1**,所以任何
+「线性段 + 非线性段」混合(段1 缓入 + 段2 线性)时,线性段右帧会被设入 100%——
+v0.2.3 的"两侧全线性才跳过"保护只在纯线性场景生效,混合场景漏网。
+
+### 修复
+
+- 线性段两侧缓动一律置 `NEUTRAL`(影响 0),不再按 y×100% 计算
+- 帧侧跳过条件改为「入、出两侧都是 NEUTRAL 引用」——精确表达"该帧无缓动"
+- mock 断言验证:全线性 → 0 次调用;缓入+线性 → 帧3(线性侧)不被污染;
+  线性+缓入 → 帧1 不动;全缓入缓出 → 3 帧全部 BEZIER + 正确参数
+
+### 教训
+
+1. **AE 脚本的可测性扩展到了 AE 层**:applySegCurves 依赖 AE 对象但可以
+   mock——把"会真机翻车"的逻辑先用 node 模拟跑一遍,成本极低收益极高
+2. 近似公式要检查**边界预设**:线性(0 0 1 1)是 bezier 的退化情形,必须单独处理,
+   不能套通用公式
+3. 用户要求"先核验"是合理的工作方式:发布前用 mock 测试覆盖调用序列
+
+## v0.2.3(2026-08-18)— 曲线套用不生效:插值类型 + 索引匹配
+
+### 症状
+
+用户选「缓入缓出」预设,打帧后关键帧**还是线性**。
+
+### 根因①:setTemporalEaseAtKey 不改变插值类型
+
+`setValueAtTime` 创建的关键帧默认插值 = **LINEAR**。`setTemporalEaseAtKey` 只写
+缓动(KeyframeEase),**不会把 LINEAR 转成 BEZIER** —— 插值仍是线性,曲线自然不显示。
+修复:设置缓动前先 `setInterpolationTypeAtKey(idx, BEZIER, BEZIER)`。
+
+### 根因②:时间匹配索引的容差陷阱
+
+原实现打完全部帧后 `findKeyIndex`(容差 0.002s)按时间找帧。播放头停在非帧边界
+(如 0.17s)时,打帧时间 t 与 `keyframeTime` 的浮点表示可能出现 >0.002s 的偏差 →
+匹配失败 → 全部 continue → 一个缓动都没设 → 依然线性,且**无声**(没有报错)。
+修复:setValueAtTime 后**立即**记录索引(此时 keyframeTime 刚写入,偏差最小),
+`findKeyIndex` 改"取最近匹配,容差 ±0.03s(≈1 帧@30fps)"。
+
+### 其他决策
+
+- 线性段(0 0 1 1)跳过设置,保持 AE 默认线性插值——零副作用、曲线编辑器显示干净
+- 报告/状态栏新增曲线应用统计(套上 N 帧/未匹配 N 帧/异常 N 属性),
+  "曲线没生效"从此不再无声
+- 帧索引在打帧循环里收集(`propFrames[p]`),曲线应用直接用——执行层职责清晰,
+  报告统计从 applySegCurves 返回值汇总
+
+### 教训
+
+1. AE 关键帧:插值类型(LINEAR/BEZIER)与缓动(KeyframeEase)是**两层**,设缓动前
+   确认插值类型;setValueAtTime 的帧默认 LINEAR
+2. 浮点时间匹配永远放宽容差或改用"写入时记录";0.002s 在 AE 时间精度下不可靠
+3. 新功能不生效的排查顺序:先查"有没有真正执行到"(加统计),再查"API 前置条件"
+
+## v0.2.2(2026-08-18)— 曲线区入口消失 + 打开慢:可见性设计与行池策略
+
+### 症状
+
+用户:UI 上看不到「曲线功能」开关(连打开的入口都没有)+ 面板打开比较久。
+
+### 根因①:把"开关本身"藏进了按开关状态控制的隐藏组
+
+`refresh()` 里 `grpCurve.visible = curveShow`(curveShow = 曲线开关 && 非表达式)。
+曲线开关默认**关** → 整个 grpCurve(checkbox + 导出/导入按钮)visible=false →
+用户看不到开关 → 永远勾不到 → 功能像"没做"。
+**教训:总开关必须常驻可见,只能把"开关控制的内容区"藏起来。**
+
+### 根因②:一次性预建 29 段行(145 个原生控件)
+
+ScriptUI 控件是原生 OS 控件(带窗口句柄),创建开销大(Adobe 官方论坛性能帖点名)。
+曲线段行池一次性 `for (1..29) addSegRow()` + `rebuildPresetDropdowns()` 全量
+removeAll/add/sync —— 初始化要建 145 控件 + 数百次下拉操作,就是"打开久"。
+节点行池 `ensureRows` 本来就是懒增长,曲线段行池不一致,是 v0.2.0 引入的性能回归。
+
+### 修复
+
+- grpCurve 常驻;只有 `grpSegs` 随 `curve.enabled && vtype!==3` 显隐
+- `ensureSegRows(need)` 懒增长(与 ensureRows 同策略),返回是否新增行,新增时 layout(true)
+- refresh 曲线段只遍历 `segList.length`;节点开关 onClick 补 layout(true)
+- `addSegRow` 下拉创建时即用 `ddItemsForPresets()`(自定义+全量预设),懒增长后
+  `syncSegDropdown` 的 `items[idx+1]` 不会越界
+
+### 教训
+
+1. **UI 可见性设计**:功能总开关永远可见,内容区才随开关显隐
+2. **行池策略必须统一**:要么全懒增长,要么有明确理由全量预建;ScriptUI 控件按需创建
+3. 结构评估(主线 8/支线 7.5/模块化 7)后修复点全部落在 UI 构建层——执行层与纯函数层
+   是健康的
+
+## v0.2.1(2026-08-18)— 真机语法错误:正则 `\\` 字面量 + JSON 非内置
+
+### 症状
+
+AE 打开面板报「**在行 794 无法执行脚本。语法错误**」;`node --check` 通过(V8 认这段代码),
+ExtendScript 引擎不认——**node 检查通过 ≠ AE 能跑**的又一实例。
+
+### 根因①(直接元凶):正则字面量里的 `\\`
+
+`projectFileDir()` 里 `fsName.replace(/[^/\\]*$/, "")`——字符类 `[^/\\]` 含双反斜杠,
+ExtendScript 解析器直接语法错误。而 `/\s/g`(v0.1.7 就在用)能跑,说明问题出在 `\\` 组合。
+**结论:AE 脚本里避免任何含 `\\` 的正则字面量**,需要匹配反斜杠时用字符串方法
+(indexOf/lastIndexOf/substring)或 `new RegExp()` 字符串构造。
+
+### 根因②(排查中挖出的隐患):JSON 不是 ExtendScript 原生内置
+
+社区定论(Adobe 官方论坛):ExtendScript 是 ECMA-262 v3,`JSON.parse/stringify` 是 ES5 特性,
+**不是原生内置**——能用的机器是因为 Adobe Libraries 等面板把 JSON 泄漏进了所有面板共享的
+全局上下文。**依赖全局 JSON 会因用户环境而异**。
+
+修复:内置 ES3 自包含迷你 JSON(针对本插件固定格式):
+- `stringifyPresets(presets)` → 标准 JSON 文本(缩进美观,用户可手编;任何工具可读)
+- `parsePresetsText(txt)` → 优先全局 JSON.parse(严谨),失败/不可用退回
+  `extractPresetsFallback`(逐字符扫描 `{...}` 块 + grabStr/grabNum,零正则)
+- 全程零正则字面量,规避根因①的坑
+
+### 教训
+
+1. ExtendScript 语法检查要靠**真机**,node --check 只能拦 V8 语法;
+   新增正则/字符串转义类代码时先自问"ExtendScript 解析器认不认"
+2. AE 脚本的 JSON 必须自带实现,禁止依赖全局
+3. 排查"语法错误"时,先 grep 全文件正则字面量,`\\` 组合是头号嫌疑
+
+## v0.2.0(2026-08-18)— 曲线功能:预设下拉 + 4 数值 + 导出导入
+
+### 设计决策
+
+- **段 = 开启节点的相邻对**(`curveSegments(on, count)`):关闭节点断开链条,
+  5 节点全开 = 4 段,关掉节点2 → [1,3] 直连成段。这是"关闭剔除"语义的自然延伸,
+  不是固定槽位对(用户初稿说"5 个节点中间加 4 个"= 全开情形)。
+- **预设交互**(用户确认):下拉 items = [自定义, 内置4, ...导入];选预设 → 填 4 空;
+  手填 → `matchPreset` 容差 1e-4 匹配,命中显示预设名,否则「自定义」。
+- **导出/导入**:JSON `{version:1, presets:[{name,x1,y1,x2,y2}]}`,默认存当前工程目录
+  (`app.project.file` 的父目录,未保存退回 ~),`f.encoding="UTF-8"` 防中文乱码;
+  导入合并同名覆盖;ExtendScript 内置 JSON 对象可用。
+- **bezier → AE 缓动近似**(选型既定,用户选 cubic-bezier):每段 = 左帧「出」+ 右帧「入」,
+  `setTemporalEaseAtKey(keyIndex, easeIn, easeOut)`:出影响 = y1×100%、入影响 = y2×100%、
+  速度 = 段平均速度(valDiff/秒)。**固有精度损失**(bezier 与 AE 影响模型不是同构的),
+  数值上不完全等于手调曲线,对快速 K 动画够用。
+- 表达式模式禁用曲线(vtype===3 直接走 applyExpression,曲线区隐藏)。
+
+### 实现要点
+
+- 曲线段行池:预建 MAX_COUNT-1 = 29 行(同节点行池思路),refresh 按当前段数切换 visible;
+  `state.curve.seg[i]` 按段序号存,段数变化(开关/节点数变动)时旧值保留、缺的补线性。
+- 手填 4 空 → 只调 `syncSegDropdown`(写下拉 selection,**不调 refresh**,不写回文本)——否则
+  正在编辑的框被 refresh 重置(AGENTS 坑 13 同款)。
+- `applySegCurves` 内 segs 缺段时按线性兜底(下标对齐,防 undefined 崩)。
+- 测试 50 → 74 断言:matchPreset(容差/不匹配)/ curveSegments(开关重排)/
+  mergePresets(同名覆盖+不修改原)/ validatePresets(过滤非法、y 可超 1 回弹)/ valDiff。
+
 ## v0.1.17/0.1.18(2026-08-18)— 维度判断定案:threeDLayer 是唯一真相
 
 ### 定案数据(dim_test.jsx 用户实测)

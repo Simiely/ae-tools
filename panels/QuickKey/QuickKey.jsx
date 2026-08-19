@@ -1,117 +1,49 @@
 ﻿// ============================================================
 // QuickKey · 节点式 K 帧排程面板  QuickKey.jsx
-// 版本: 0.1.18  (2026-08-18)
+// 版本: 0.2.13  (2026-08-19)
 // 适用: After Effects CC 2015.3+ (依赖 selectedProperties API)
 //
-// v0.1.18 变更:维度判断补两个缺口(用户问"还有别的判断方式"盘点后补)
-//   ① 摄像机/灯光图层恒 3D(无 3D 开关,threeDLayer 读不到)→ propLayerInfo
-//      识别 layerType(camera/light),propDimOf 强制 is3D=true
-//   ② 分离尺寸跟随者(位置X/位置Y)→ separationLeader 非空 = 单值属性,
-//      propDimCore 新增 isSep 参数恒返回 1
+// 以当前时间指示器为锚点,按节点排程给选中属性批量打关键帧;
+// 曲线功能为每段套 cubic-bezier 缓动;预设可导出/导入 JSON。
 //
-// v0.1.17 变更:维度判断彻底修正(用户三次坚持无 3D,诊断实测定案)
-//   - 定案数据(AE 26.0 实测):2D 图层(3D开关=关)的 位置/锚点
-//     propertyValueType=6413(ThreeD_SPATIAL)、缩放=6414(ThreeD)——
-//     AE 2026 的 2D 变换属性 .value 与 propertyValueType 都报 3D!
-//     唯一可靠的维度真相 = 图层 threeDLayer 开关。
-//   - 修复:propDimCore(mn, vt, is3D) 纯决策——变换属性
-//     (位置/缩放/锚点/方向)以图层 3D 开关定维度,OneD 恒 1 维,
-//     非变换属性退回 propertyValueType。枚举数值硬编码(AE 26.0 实测):
-//     ThreeD_SPATIAL=6413, ThreeD=6414, TwoD_SPATIAL=6415, TwoD=6416, OneD=6417。
+// 代码地图(用函数名定位,行号会随编辑漂移):
+//   纯逻辑层(node 可测,test_quickkey.js 105 断言):
+//     排程: anchorPos / computeTimes / classifyValue / buildPlan / planHasExplicit
+//     曲线: matchPreset / curveSegments / mergePresets / validatePresets /
+//            isLinearPreset / bezierToEase / valDiff
+//     迷你 JSON(ES3 自包含,勿依赖全局 JSON): stringifyPresets /
+//            parsePresetsText / extractPresetsFallback
+//   预检层(AE 依赖): propDimOf / propLayerInfo / dimCheck / failDimCheck
+//   公共辅助: withUndo / perProp / setStatus / propName / errMsg
+//   执行层: setKeyAt / applySegCurves / executePlan / buildReport /
+//            applyExpression / doKey / exportPresets / importPresets
+//   UI 层: 面板构建 / addRow·ensureRows(节点行池)/ addSegRow·ensureSegRows
+//           (曲线段行池,懒增长)/ refresh / syncSegDropdown /
+//           rebuildPresetDropdowns / showReport
 //
-// v0.1.16 变更:图层诊断遍历修复(连报 3 维的真相已确认)
-//   - 用户原始诊断显示 [类型:ThreeD/ThreeD_SPATIAL] —— AE 自报 3D 类型,
-//     即这些图层确实开了「3D 图层开关」(非插件误判);"没开过"多为
-//     复制/粘贴图层、拖摄像机灯光或误点立方体图标导致。
-//   - 但「图层名 + 3D 开关」标注没显示出来:propLayerInfo 用 instanceof Layer
-//     遍历 parentProperty 失败(静默)。改为 duck-typing(containingComp)识别
-//     Layer + parentProperty/propertyGroup 双通道上溯 + 防死循环守卫。
-//
-// v0.1.15 变更:位数预检加入原始诊断(连报 3 维,停止猜测)
-//   - 不匹配提示附带 AE 原始数据:propertyValueType 常量名(如 ThreeD_SPATIAL)
-//     + 所属图层名 + 所在合成 + threeDLayer 原始开关状态
-//   - 下次报告即确凿证据:能区分「AE 真把 2D 报成 3D(异常)」还是
-//     「图层确实开了 3D 开关(预检正确)」
-//
-// v0.1.14 变更:执行层重构(用户:逻辑越来越乱,先优化)
-//   - doKey 拆为三段:buildPlan(纯计算,node 可测)→ executePlan(只写 AE)
-//     → buildReport(纯文本拼接),报告与执行不再交错
-//   - 抽公共辅助 withUndo(label, fn) / perProp(props, fn) / failDimCheck(),
-//     doKey 与 applyExpression 的 undo/逐属性/报告五连重复消除
-//   - 新增纯函数 buildPlan / planHasExplicit,回归测试扩至 39 断言
-//   - 行为不变:报告格式、预检、自动弹窗、undo 分组全部保持
-//
-// v0.1.13 变更:位数预检重写(用户反馈逻辑混乱)
-//   - 重写为三个单一职责函数:propDimOf(维度,propertyValueType 权威)、
-//     propLayerInfo(图层名 + 3D 开关诊断)、dimCheck(统一入口返回 {ok,lines,sugDim})
-//   - 提示新增图层诊断:3 维属性若所属图层开了 3D 图层开关,直接写明
-//     「(图层「X」已开启 3D 图层开关)」——2D 图层看着却报 3 维的真相
-//
-// v0.1.12 变更:修复 2D 图层被误判为 3 维
-//   - 根因:维度判断用 prop.value.length,而 AE 2026 中 2D 图层的位置/锚点
-//     .value 返回 [x,y,0](3 元素,第三位为 0),会把 2D 误判成 3 维。
-//   - ⚠️ 本版本"改用 propertyValueType"的修复已被 v0.1.17 实测推翻:
-//     AE 2026 的 2D 变换属性 propertyValueType 同样报 3D(6413/6414),
-//     唯一可靠来源是图层 threeDLayer 开关。历史记录仅存档,勿再采用。
-//
-// v0.1.11 变更:位数预检提示增强
-//   - 不匹配提示改为智能建议:所有不匹配属性维度一致时,直接给出
-//     「建议「数值输入」切到「N 个空」」(如 3D 属性 × 2 空 → 建议切 3 空)
-//
-// v0.1.10 变更:数值位数预检(撤销 v0.1.8 的自动广播/补齐,用户明确要求)
-//   - 执行前先查询选中属性的维度(1/2/3),与「数值输入」空数比对;
-//     不匹配 → 弹窗提示「数值位数不匹配」并中止,不做任何写入。
-//   - 留空(用当前值)的节点不参与校验;特殊属性(如文本)不预检,执行时兜底。
-//
-// v0.1.9 变更:UI 调整
-//   - 数值输入下拉「公式」→「表达式」(与功能语义一致)
-//   - 「节点数」行移到面板最顶(顺序:节点数 → 模式 → 数值输入 → 表达式)
-//
-// v0.1.8 变更:数值维度自动适配(后被 v0.1.10 撤销,保留记录)
-//   - fillDimsValue 数字广播/补齐;用户明确拒绝"魔法"行为,已删除
-//
-// v0.1.7 变更:修复"1 空模式全部判非法"——数值存储改数组
-//   - 根因(由 v0.1.6 调试报告定位):旧版 state.val 用逗号拼接字符串,
-//     3 空模式部分填写(如 X=123 留空 Y/Z)存成 "123,,";切回 1 空后
-//     显示正常(只显示第一格)但解析时残留逗号 → parseFloat("") NaN
-//     → 整行判非法 → 0 关键帧。报告原文:「数值非法[123,,]」。
-//   - 修复:state.val[slot] 改为【每空一格】的字符串数组(长度 3),
-//     框对格直读直写,不再逗号拼接/拆分,杜绝残留逗号;
-//     切换数值类型不丢数据(3 空 "123/540/0" → 1 空显示 "123" → 切回还原)。
-//
-// v0.1.6 变更:调试报告 + 执行归类(修复"打帧无效果"难排查)
-//   - 新增「调试」按钮:点击弹出本次执行完整报告——模式/节点数/数值类型、
-//     每个节点的 时间/原始值/解析结果、每个属性的失败原因与错误信息、
-//     表达式启用状态。打帧结果为零(或表达式全部失败)时自动弹出。
-//   - parseValueDim 升级为 classifyValue:empty(留空→当前值)/
-//     fixed(数字或数组)/ bad(非法·部分填写·超维度 → 可见跳过)
-//
-// v0.1.5 变更:数值输入类型切换(下拉:1 个空 / 2 个空 / 3 个空 / 表达式)
-//   - 1/2/3 空 = 每节点 1~3 个数值输入框,写入 [x] / [x,y] / [x,y,z] 数组
-//   - 表达式模式:单个表达式框,点按钮写入选中属性,不排关键帧
-//
-// v0.1.4 变更:节点数动态化(1~30,默认 5);节点区"行池"复用
-// v0.1.3 变更:关闭节点从排程链完全剔除(不占位)
-// v0.1.2 变更:修复中间/末尾帧倒推计算 bug;术语改「当前时间指示器」
-// v0.1.1 变更:新增每节点「数值」输入框(留空=用属性当前值)
-//
-// 设计(与用户确认的规格):
-//   - N 个节点位(默认 5,可 1~30;1 锚点 + N-1 可开关节点),时间轴方向 上早下晚
-//   - 当前时间指示器所在帧 = 锚点帧,角色可选:起始 / 中间 / 末尾
-//     · 起始:锚点排第 1 位,下方 N-1 节点
-//     · 中间:锚点排第 ⌈N/2⌉ 位,上方 ⌈N/2⌉-1、下方 N-⌈N/2⌉(偶数时略偏上)
-//     · 末尾:锚点排第 N 位,上方 N-1 节点
-//   - 间隔语义 = 与"靠锚点一侧最近开启节点(或锚点)"的帧距(即节点自己的间隔):
-//     · 锚点下方节点:从锚点往后累加(节点4 = +gap4,节点5 = +gap4+gap5)
-//     · 锚点上方节点:从锚点往前倒推(节点2 = -gap2,节点1 = -gap2-gap1)
-//   - 点「打帧」:在选中图层当前选中的属性(comp.selectedProperties)
-//     上,按排程时间依次打关键帧,数值 = 各节点数值(留空用当前值)
-//   - 「表达式」模式:表达式写入选中属性,不排帧
-//   - 整次操作包在一个 Undo 组里,一键 Ctrl+Z 整体撤销
+// 关键设计(改代码前必读,详见 AGENTS.md / DEVELOPMENT.md):
+//   - 间隔 = 与「靠锚点侧最近开启节点」的帧距;关闭节点完全剔除
+//   - 曲线段 = 开启节点的相邻对;总开关常驻可见,段行区随开关显隐
+//   - 维度判断:变换属性以图层 threeDLayer 开关为准(AE 2026 的 2D 变换
+//     属性 value/propertyValueType 都报 3D,勿用这两者判断)
+//   - 曲线套用(v0.2.12 重写):打帧用 setKeyAt(addKey 创建即得索引);
+//     逐段 bezierToEase(公式集中一处)→ 逐帧先转 BEZIER 插值再
+//     setTemporalEaseAtKey(缓动参数是【数组】,1D/2D/3D = 1/2/3 个);
+//     线性段两侧缓动置中性,两侧都中性才跳过
+//   - ExtendScript 雷区:禁写含双反斜杠的正则字面量(语法错误);
+//     JSON 非原生内置,必须用自带迷你 JSON
+//   - 打帧目标 = selectedProperties;整次操作一个 Undo 组(Ctrl+Z 整体撤销)
+//   - Tab 键只在数字输入框之间循环(v0.2.7:onKeyDown 拦 Tab → 手动聚焦下一个
+//     可见数字框,避开开关/下拉/按钮)
+//   - KeyframeEase influence 合法范围 [0.1..100](v0.2.8:传 0 构造抛错→曲线
+//     应用整体失败,报告"1 个属性异常";中性/出侧钳到 0.1≈线性)
+//   - bezier→AE 映射公式(v0.2.9,社区公认):X 坐标→影响(x1×100、[1−x2]×100)、
+//     Y 坐标→速度(y1×avg/x1、[1−y2]×avg/[1−x2]),avg=段平均速度归一化;
+//     之前 X/Y 用反导致"范围对不上"(用户质疑定位)
 //
 // 安装:免安装,文件部署到用户级目录
-//   %APPDATA%\Adobe\After Effects\<ver>\Scripts\ScriptUI Panels\
-//   (本仓库统一用 install.py 部署,自动补 UTF-8 BOM + 字节校验)
+//   %APPDATA%\Adobe\After Effects\<ver>\Scripts\ScriptUI Panels//   (本仓库统一用 install.py 部署,自动补 UTF-8 BOM + 字节校验)
+// 历史版本记录 → CHANGELOG.md;架构与坑 → DEVELOPMENT.md / AGENTS.md
 // ============================================================
 
 (function (thisObj) {
@@ -121,6 +53,14 @@
     var VTYPE_NAMES = ["1 个空", "2 个空", "3 个空", "表达式"];
     var MAX_COUNT = 30;   // 节点数上限(防面板撑爆)
 
+    // 内置曲线预设(cubic-bezier):线性 / 缓入 / 缓出 / 缓入缓出
+    var PRESETS_DEFAULT = [
+        {name: "线性",     x1: 0,    y1: 0,    x2: 1,    y2: 1},
+        {name: "缓入",     x1: 0.42, y1: 0,    x2: 1,    y2: 1},
+        {name: "缓出",     x1: 0,    y1: 0,    x2: 0.58, y2: 1},
+        {name: "缓入缓出", x1: 0.42, y1: 0,    x2: 0.58, y2: 1}
+    ];
+
     // 锚点槽位:起始 = 1,中间 = ⌈N/2⌉,末尾 = N(v0.1.4 起随 N 动态)
     function anchorPos(mode, n) {
         if (mode === 0) { return 1; }
@@ -129,6 +69,11 @@
     }
 
     // ---------- 状态 ----------
+    var curvePresetsInit = [];
+    for (var cpi = 0; cpi < PRESETS_DEFAULT.length; cpi++) {
+        curvePresetsInit.push(clonePreset(PRESETS_DEFAULT[cpi]));
+    }
+
     var state = {
         mode: 0,                       // 0=起始 1=中间 2=末尾
         count: 5,                      // 节点数(1~30,默认 5)
@@ -139,6 +84,11 @@
         val: {                                 // 槽位数值:每空一格,数组长度 3(v0.1.7)
             1: ["", "", ""], 2: ["", "", ""], 3: ["", "", ""],
             4: ["", "", ""], 5: ["", "", ""]
+        },
+        curve: {                         // 曲线功能(v0.2.0)
+            enabled: false,              // 总开关
+            presets: curvePresetsInit,   // 预设列表(内置 + 导入,同名覆盖)
+            seg: {}                      // 段 1..n: {preset, x1, y1, x2, y2}
         }
     };
     var lastReport = "";               // 上次执行报告(调试按钮弹出)
@@ -152,6 +102,14 @@
                 state.val[i] = ["", "", ""];
             }
         }
+    }
+
+    // 曲线段状态:按段序号补齐(默认线性),已有值保留
+    function ensureCurveSeg(i) {
+        if (!state.curve.seg[i]) {
+            state.curve.seg[i] = {preset: "线性", x1: 0, y1: 0, x2: 1, y2: 1};
+        }
+        return state.curve.seg[i];
     }
 
     // ===== 纯逻辑层(不依赖 AE,node 可测)=====
@@ -250,6 +208,235 @@
             if (!plan[i].closed && plan[i].kind === "fixed") { return true; }
         }
         return false;
+    }
+
+    // ===== 曲线纯函数(v0.2.0,node 可测)=====
+
+    function clonePreset(p) {
+        return {name: p.name, x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2};
+    }
+
+    // 线性判定(0 0 1 1 = 匀速)
+    function isLinearPreset(x1, y1, x2, y2) {
+        return x1 === 0 && y1 === 0 && x2 === 1 && y2 === 1;
+    }
+
+    // bezier→AE 缓动转换(社区公认公式,v0.2.9 三方交叉验证,集中一处便于维护):
+    //   X 坐标→影响(x1×100、[1−x2]×100,钳 0.1~100 并四舍五入 1 位)
+    //   Y 坐标→速度(y1×avg/x1、[1−y2]×avg/[1−x2];x=0 / x2=1 除零退 avg)
+    //   线性(0 0 1 1)→ null(两侧用中性缓动,保持 AE 默认线性)
+    // avg = 该段平均速度(值/秒)。返回 {out:{speed,influence}, inE:{speed,influence}} 或 null
+    // 注意:属性名不能用 in(in 是 ES3 保留字,ExtendScript 报「非法使用保留字」;
+    // node 现代引擎允许,node --check 拦不住——v0.2.13 真机踩坑)
+    function bezierToEase(x1, y1, x2, y2, avg) {
+        if (isLinearPreset(x1, y1, x2, y2)) { return null; }
+        var inflOut = Math.round(Math.max(0.1, Math.min(100, x1 * 100)) * 10) / 10;
+        var spdOut = (x1 > 0.0001) ? y1 * avg / x1 : avg;
+        var inflIn = Math.round(Math.max(0.1, Math.min(100, (1 - x2) * 100)) * 10) / 10;
+        var spdIn = (x2 < 0.9999) ? (1 - y2) * avg / (1 - x2) : avg;
+        return {
+            out: {speed: spdOut, influence: inflOut},
+            inE: {speed: spdIn, influence: inflIn}
+        };
+    }
+
+    // 精确匹配预设(浮点容差 1e-4),命中返回下标,否则 -1
+    function matchPreset(presets, x1, y1, x2, y2) {
+        for (var i = 0; i < presets.length; i++) {
+            var p = presets[i];
+            if (Math.abs(p.x1 - x1) < 0.0001 && Math.abs(p.y1 - y1) < 0.0001
+                && Math.abs(p.x2 - x2) < 0.0001 && Math.abs(p.y2 - y2) < 0.0001) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    // 曲线段 = 开启节点的相邻对([[s1,s2], [s2,s3], ...]);关闭节点断开链条
+    // (关闭剔除语义的自然延伸:5 节点全开 = 4 段,关掉节点2 → [1,3] 直接成段)
+    function curveSegments(on, count) {
+        var open = [];
+        for (var s = 1; s <= count; s++) {
+            if (on[s]) { open.push(s); }
+        }
+        var segs = [];
+        for (var i = 1; i < open.length; i++) {
+            segs.push([open[i - 1], open[i]]);
+        }
+        return segs;
+    }
+
+    // 合并预设:同名(name)覆盖,新名追加;不修改原数组(深拷贝返回)
+    function mergePresets(existing, imported) {
+        var out = [];
+        for (var i = 0; i < existing.length; i++) { out.push(clonePreset(existing[i])); }
+        for (var j = 0; j < imported.length; j++) {
+            var imp = imported[j];
+            var found = -1;
+            for (var k = 0; k < out.length; k++) {
+                if (out[k].name === imp.name) { found = k; break; }
+            }
+            if (found >= 0) { out[found] = clonePreset(imp); }
+            else { out.push(clonePreset(imp)); }
+        }
+        return out;
+    }
+
+    // 校验导入数据(data = JSON.parse 结果):
+    //   接受 {presets:[...]} 或裸数组;过滤非法项(name 非空字符串、
+    //   4 数均为数字、x1/x2 在 0~1);格式完全不对返回 null
+    function validatePresets(data) {
+        var arr = (data && data.presets instanceof Array) ? data.presets
+                : (data instanceof Array ? data : null);
+        if (!arr) { return null; }
+        var out = [];
+        for (var i = 0; i < arr.length; i++) {
+            var p = arr[i];
+            if (!p || typeof p.name !== "string" || !p.name) { continue; }
+            var x1 = Number(p.x1), y1 = Number(p.y1), x2 = Number(p.x2), y2 = Number(p.y2);
+            if (isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) { continue; }
+            if (x1 < 0 || x1 > 1 || x2 < 0 || x2 > 1) { continue; }   // bezier x 限 0~1
+            out.push({name: p.name, x1: x1, y1: y1, x2: x2, y2: y2});
+        }
+        return out;
+    }
+
+    // 数值差(标量,供曲线速度计算):数字直接差;数组取各维最大绝对差
+    function valDiff(a, b) {
+        if (typeof a === "number" && typeof b === "number") { return Math.abs(a - b); }
+        if (a instanceof Array && b instanceof Array && a.length === b.length) {
+            var mx = 0;
+            for (var i = 0; i < a.length; i++) {
+                var d = Math.abs(a[i] - b[i]);
+                if (d > mx) { mx = d; }
+            }
+            return mx;
+        }
+        return 0;
+    }
+
+    // ===== 迷你 JSON(v0.2.1,ES3 自包含)=====
+    // ExtendScript 不原生内置 JSON(ECMA-262 v3;社区定论:依赖全局 JSON 会因
+    // 环境而异——有的机器只有开了 Adobe Libraries 面板才有泄漏的 JSON 对象)。
+    // 这里针对本插件固定格式 {version:1, presets:[{name,x1,y1,x2,y2}]} 提供
+    // 序列化与解析:零外部依赖、零正则字面量(规避 ExtendScript 解析器风险)。
+    // 导出的文本是标准 JSON,任何编辑器/工具都能读;导入优先用全局 JSON,
+    // 没有则退回手写提取。
+
+    function jsonStr(s) {
+        var out = '"';
+        for (var i = 0; i < s.length; i++) {
+            var c = s[i];
+            if (c === '"') { out += '\\"'; }
+            else if (c === "\\") { out += "\\\\"; }
+            else if (c === "\n") { out += "\\n"; }
+            else if (c === "\r") { out += "\\r"; }
+            else if (c === "\t") { out += "\\t"; }
+            else { out += c; }
+        }
+        return out + '"';
+    }
+
+    function jsonNum(n) {
+        if (typeof n !== "number" || isNaN(n) || !isFinite(n)) { return "0"; }
+        return String(n);
+    }
+
+    // presets 数组 → 标准 JSON 文本(美观缩进,方便用户手编)
+    function stringifyPresets(presets) {
+        var parts = [];
+        for (var i = 0; i < presets.length; i++) {
+            var p = presets[i];
+            parts.push('{\n    "name": ' + jsonStr(String(p.name))
+                + ',\n    "x1": ' + jsonNum(p.x1)
+                + ',\n    "y1": ' + jsonNum(p.y1)
+                + ',\n    "x2": ' + jsonNum(p.x2)
+                + ',\n    "y2": ' + jsonNum(p.y2) + "\n  }");
+        }
+        return '{\n  "version": 1,\n  "presets": [\n  ' + parts.join(",\n  ") + "\n  ]\n}";
+    }
+
+    // 在 "{...}" 块内提取字符串键值(name):返回解码后的字符串,找不到返回 null
+    // 解码用逐字符扫描(不写正则字面量,规避 ExtendScript 解析器风险)
+    function grabStr(block, key) {
+        var q = '"' + key + '"';
+        var p = block.indexOf(q);
+        if (p < 0) { return null; }
+        p = block.indexOf('"', p + q.length);
+        if (p < 0) { return null; }
+        p++;
+        var e = block.indexOf('"', p);
+        if (e < 0) { return null; }
+        var raw = block.substring(p, e);
+        var out = "";
+        for (var k = 0; k < raw.length; k++) {
+            var c = raw[k];
+            if (c === "\\" && k + 1 < raw.length) {
+                var c2 = raw[k + 1];
+                if (c2 === '"') { out += '"'; k++; }
+                else if (c2 === "\\") { out += "\\"; k++; }
+                else if (c2 === "n") { out += "\n"; k++; }
+                else if (c2 === "r") { out += "\r"; k++; }
+                else if (c2 === "t") { out += "\t"; k++; }
+                else { out += c; }
+            } else { out += c; }
+        }
+        return out;
+    }
+
+    // 在 "{...}" 块内提取数字键值:跳过空白与冒号后读数字,找不到/非法返回 null
+    function grabNum(block, key) {
+        var q = '"' + key + '"';
+        var p = block.indexOf(q);
+        if (p < 0) { return null; }
+        var rest = block.substring(p + q.length);
+        var j = 0;
+        while (j < rest.length && (rest[j] === " " || rest[j] === "\t"
+                || rest[j] === "\n" || rest[j] === "\r" || rest[j] === ":")) { j++; }
+        var start = j;
+        while (j < rest.length && ((rest[j] >= "0" && rest[j] <= "9")
+                || rest[j] === "." || rest[j] === "-" || rest[j] === "+"
+                || rest[j] === "e" || rest[j] === "E")) { j++; }
+        if (j === start) { return null; }
+        var n = parseFloat(rest.substring(start, j));
+        return isNaN(n) ? null : n;
+    }
+
+    // 手写提取(全局 JSON 不存在时的回退):扫描每个 "{...}" 块,校验字段
+    function extractPresetsFallback(txt) {
+        var out = [];
+        var i = 0;
+        var len = txt.length;
+        while (i < len) {
+            var s = txt.indexOf("{", i);
+            if (s < 0) { break; }
+            var e = txt.indexOf("}", s);
+            if (e < 0) { break; }
+            var block = txt.substring(s + 1, e);
+            i = e + 1;
+            var name = grabStr(block, "name");
+            var x1 = grabNum(block, "x1");
+            var y1 = grabNum(block, "y1");
+            var x2 = grabNum(block, "x2");
+            var y2 = grabNum(block, "y2");
+            if (name !== null && name !== "" && x1 !== null && y1 !== null
+                && x2 !== null && y2 !== null && x1 >= 0 && x1 <= 1 && x2 >= 0 && x2 <= 1) {
+                out.push({name: name, x1: x1, y1: y1, x2: x2, y2: y2});
+            }
+        }
+        return out.length > 0 ? out : null;
+    }
+
+    // 导入入口:优先全局 JSON.parse(标准严谨),失败/不可用退回手写提取
+    function parsePresetsText(txt) {
+        try {
+            if (typeof JSON !== "undefined" && JSON.parse) {
+                var d = JSON.parse(txt);
+                var v = validatePresets(d);
+                if (v !== null && v.length > 0) { return v; }
+            }
+        } catch (e) {}
+        return extractPresetsFallback(txt);
     }
 
     // ===== 预检层(AE 依赖)=====
@@ -431,24 +618,137 @@
         return {ok: ok, bad: bad, entries: entries};
     }
 
+    // 预设名 → 下标(导入/选择用)
+    function presetIndexByName(presets, name) {
+        for (var i = 0; i < presets.length; i++) {
+            if (presets[i].name === name) { return i; }
+        }
+        return -1;
+    }
+
     // ===== 执行层 =====
 
-    // 执行计划:只写 AE(setValueAtTime),不拼报告
-    // 返回 {kfCount, badCount, fails} — fails 为 [{slot, propIdx, msg, exp}]
-    function executePlan(comp, props, plan) {
+    // 打一个关键帧并返回其索引(官方 API 方案,v0.2.11):
+    //   - 先按时间找已有帧(容差 ±0.05s ≈ 1.5 帧——社区确认 AE 关键帧放置
+    //     有精度问题,Paul Tuersley 社区帖;原 0.03s 容差可能漏)→ 复用其索引
+    //   - 无已有帧 → prop.addKey(t) 直接创建并返回索引(官方文档:addKey
+    //     "Adds a new keyframe... returns the index of the new keyframe",
+    //     创建即得,彻底不依赖"打完再按时间找"——v0.2.10 真机「3 索引无效」)
+    //   - addKey 异常兜底 setValueAtTime + numKeys(极端情况,帧仍打上)
+    function setKeyAt(prop, t, wv) {
+        var idx = 0;
+        try {
+            var n = prop.numKeys;
+            for (var k = 1; k <= n; k++) {
+                if (Math.abs(prop.keyframeTime(k) - t) < 0.05) { idx = k; break; }
+            }
+        } catch (e) { idx = 0; }
+        if (idx === 0) {
+            try { idx = prop.addKey(t); }
+            catch (e2) { idx = 0; }
+        }
+        if (idx > 0) { prop.setValueAtKey(idx, wv); }
+        else { prop.setValueAtTime(t, wv); idx = prop.numKeys; }
+        return idx;
+    }
+
+    // 给一个属性的关键帧序列套缓动曲线(v0.2.12 重写,逻辑梳理):
+    //   frames = [{t, v, idx}] 按时间升序;idx 来自打帧时 setKeyAt 的 addKey 返回值
+    //   segs   = 每段 {x1,y1,x2,y2}(长度 m-1,bezier 0~1)
+    // 流程:
+    //   1. 逐段 bezierToEase(avg = 段值差/时差)→ 每段的入/出缓动
+    //   2. 帧 k 的「出」= 段 k 的「出」,帧 k+1 的「入」= 段 k 的「入」;
+    //      首帧「入」/末帧「出」= NEUTRAL
+    //   3. 两侧都中性的帧跳过(保持 AE 默认线性);否则先转 BEZIER 插值再设缓动
+    //      (setValueAtTime/addKey 打的帧默认 LINEAR 插值,直接设缓动不生效)
+    //   4. setTemporalEaseAtKey 缓动参数是【数组】(1D=1/2D=2/3D=3,按 propDimOf)
+    // 返回 {applied, missed, missIdx, missErr, missErrMsg}:
+    //   missIdx = 帧索引无效/找不到;missErr = 调用抛错(带回首个错误文本)
+    function applySegCurves(prop, frames, segs) {
+        var m = frames.length;
+        var EMPTY = {applied: 0, missed: 0, missIdx: 0, missErr: 0, missErrMsg: ""};
+        if (m < 2) { return EMPTY; }
+        var dim = 1;
+        try { var pd = propDimOf(prop); if (pd > 0) { dim = pd; } } catch (e9) {}
+        function easeArr(e) {
+            var arr = [];
+            for (var d = 0; d < dim; d++) { arr.push(e); }
+            return arr;
+        }
+        var NEUTRAL = new KeyframeEase(0, 0.1);   // influence 下限 0.1(官方 [0.1..100])
+        // 逐帧的入/出缓动(inEase[1] = 帧1入 = 中性;outEase[m] = 帧m出 = 中性)
+        var inEase = [];
+        var outEase = [];
+        var j;
+        for (j = 1; j < m; j++) {
+            var sg = segs[j - 1];
+            var dt = frames[j].t - frames[j - 1].t;
+            var avg = (dt > 0.000001) ? valDiff(frames[j].v, frames[j - 1].v) / dt : 0;
+            var conv = sg ? bezierToEase(sg.x1, sg.y1, sg.x2, sg.y2, avg) : null;
+            if (conv) {
+                outEase[j] = new KeyframeEase(conv.out.speed, conv.out.influence);   // 帧 j 出
+                inEase[j + 1] = new KeyframeEase(conv.inE.speed, conv.inE.influence); // 帧 j+1 入
+            } else {
+                outEase[j] = NEUTRAL;
+                inEase[j + 1] = NEUTRAL;
+            }
+        }
+        var applied = 0;
+        var missed = 0;
+        var missIdx = 0;
+        var missErr = 0;
+        var missErrMsg = "";
+        for (var k = 1; k <= m; k++) {
+            var idx = frames[k - 1].idx;
+            if (!idx || idx <= 0) { missed++; missIdx++; continue; }
+            var inE = inEase[k] || NEUTRAL;
+            var outE = outEase[k] || NEUTRAL;
+            if (inE === NEUTRAL && outE === NEUTRAL) { continue; }
+            try {
+                prop.setInterpolationTypeAtKey(idx,
+                    KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
+                prop.setTemporalEaseAtKey(idx, easeArr(inE), easeArr(outE));
+                applied++;
+            } catch (e8) {
+                missed++;
+                missErr++;
+                if (!missErrMsg) { missErrMsg = errMsg(e8); }
+            }
+        }
+        return {applied: applied, missed: missed, missIdx: missIdx, missErr: missErr, missErrMsg: missErrMsg};
+    }
+
+    // 执行计划:只写 AE(setValueAtTime + 可选曲线),不拼报告
+    // opts: {curveOn, curveSegs} — curveOn=true 时对每个属性套曲线
+    // 返回 {kfCount, badCount, fails, curveApplied, curveMissed, curveFail, curveErr}
+    function executePlan(comp, props, plan, opts) {
         var kfCount = 0;
         var badCount = 0;
         var fails = [];
+        var curveApplied = 0;
+        var curveMissed = 0;
+        var curveMissIdx = 0;
+        var curveMissErr = 0;
+        var curveMissErrMsg = "";
+        var curveFail = 0;
+        var curveErr = "";
+        opts = opts || {};
         withUndo("QuickKey K帧", function () {
+            // 每个属性打上的帧(含打帧时立即记录的索引,v0.2.3)
+            var propFrames = [];
+            for (var pf0 = 0; pf0 < props.length; pf0++) { propFrames.push([]); }
             for (var i = 0; i < plan.length; i++) {
                 var item = plan[i];
                 if (item.closed) { continue; }                       // 关闭节点:不打帧
                 if (item.kind === "bad") { badCount += props.length; continue; }  // 非法:整行跳过
                 var t = comp.time + item.offset * comp.frameDuration;
                 var v = item.value;
-                var r = perProp(props, function (prop) {
-                    if (v === null) { prop.setValueAtTime(t, prop.value); }
-                    else { prop.setValueAtTime(t, v); }
+                var r = perProp(props, function (prop, p) {
+                    var wv;
+                    if (v === null) { wv = prop.value; }
+                    else { wv = v; }
+                    var idx = setKeyAt(prop, t, wv);   // v0.2.11:创建即得索引(addKey)
+                    propFrames[p].push({t: t, v: wv, idx: idx});
                 });
                 kfCount += r.ok;
                 badCount += r.bad;
@@ -461,12 +761,38 @@
                     }
                 }
             }
+            // 曲线应用:每个属性按打帧时记录的帧序列套缓动
+            if (opts.curveOn && opts.curveSegs && opts.curveSegs.length > 0) {
+                for (var p = 0; p < props.length; p++) {
+                    var frames = propFrames[p];
+                    if (frames.length >= 2) {
+                        try {
+                            var cr = applySegCurves(props[p], frames, opts.curveSegs);
+                            curveApplied += cr.applied;
+                            curveMissed += cr.missed;
+                            curveMissIdx += cr.missIdx;
+                            curveMissErr += cr.missErr;
+                            if (!curveMissErrMsg) { curveMissErrMsg = cr.missErrMsg; }
+                        } catch (e7) {
+                            curveFail++;
+                            if (!curveErr) { curveErr = errMsg(e7); }   // v0.2.8:记首个异常信息
+                        }
+                    }
+                }
+            }
         });
-        return {kfCount: kfCount, badCount: badCount, fails: fails};
+        return {
+            kfCount: kfCount, badCount: badCount, fails: fails,
+            curveApplied: curveApplied, curveMissed: curveMissed,
+            curveMissIdx: curveMissIdx, curveMissErr: curveMissErr,
+            curveMissErrMsg: curveMissErrMsg,
+            curveFail: curveFail, curveErr: curveErr
+        };
     }
 
     // 打帧报告:纯文本拼接(报告与执行彻底分离,v0.1.14)
-    function buildReport(comp, props, propNames, plan, result, st) {
+    // curveNames = 各段预设名(如 "线性 / 缓入")或 null(曲线关闭)
+    function buildReport(comp, props, propNames, plan, result, st, curveNames) {
         var report = [];
         report.push("QuickKey 打帧报告 · " + MODE_NAMES[st.mode] + " · 节点 " + st.count
             + " · 数值输入 " + VTYPE_NAMES[st.vtype]);
@@ -488,6 +814,24 @@
                         + (result.fails[f].exp ? " [属性已启用表达式]" : ""));
                 }
             }
+        }
+        if (curveNames) { report.push("曲线: " + curveNames); }
+        else { report.push("曲线: 未开启(勾选面板上的「曲线功能」后,段预设才参与打帧)"); }
+        if (result.curveApplied !== undefined && (result.curveApplied > 0 || result.curveMissed > 0 || result.curveFail > 0)) {
+            var cl = "曲线应用: " + result.curveApplied + " 帧套上缓动";
+            if (result.curveMissed > 0) {
+                cl += " · " + result.curveMissed + " 帧未匹配";
+                var mparts = [];
+                if (result.curveMissIdx > 0) { mparts.push(result.curveMissIdx + " 索引无效"); }
+                if (result.curveMissErr > 0) { mparts.push(result.curveMissErr + " 调用异常"); }
+                if (mparts.length > 0) { cl += "(" + mparts.join(" / ") + ")"; }
+                if (result.curveMissErrMsg) { cl += " [" + result.curveMissErrMsg + "]"; }
+            }
+            if (result.curveFail > 0) {
+                cl += " · " + result.curveFail + " 个属性异常";
+                if (result.curveErr) { cl += " [" + result.curveErr + "]"; }
+            }
+            report.push(cl);
         }
         report.push("结果: " + result.kfCount + " 个关键帧 · " + result.badCount + " 个未生效");
         return report.join("\n");
@@ -550,13 +894,89 @@
             }
         }
 
+        // 曲线段(v0.2.0):开启相邻对 → 各段预设数值;表达式模式已分流,此处必为打帧
+        var curveSegs = null;
+        if (state.curve.enabled) {
+            var segPairs = curveSegments(state.on, state.count);
+            if (segPairs.length > 0) {
+                curveSegs = [];
+                for (var si = 0; si < segPairs.length; si++) {
+                    var cseg = ensureCurveSeg(si + 1);
+                    curveSegs.push({x1: cseg.x1, y1: cseg.y1, x2: cseg.x2, y2: cseg.y2});
+                }
+            }
+        }
+
         // 执行 + 报告
-        var result = executePlan(comp, props, plan);
-        lastReport = buildReport(comp, props, propNames, plan, result, state);
+        var result = executePlan(comp, props, plan, {curveOn: (curveSegs !== null), curveSegs: curveSegs});
+        var curveNames = null;
+        if (curveSegs !== null) {
+            curveNames = [];
+            for (var cn = 0; cn < curveSegs.length; cn++) {
+                curveNames.push(ensureCurveSeg(cn + 1).preset || "自定义");
+            }
+            curveNames = curveNames.join(" / ");
+        }
+        lastReport = buildReport(comp, props, propNames, plan, result, state, curveNames);
         var msg = "完成:" + result.kfCount + " 个关键帧 · " + props.length + " 个属性 · " + MODE_NAMES[state.mode];
+        if (result.curveMissed > 0) { msg += " · " + result.curveMissed + " 帧未套上曲线(点「调试」看明细)"; }
+        else if (result.curveApplied > 0) { msg += " · 曲线已套用"; }
+        if (result.curveFail > 0) { msg += " · 曲线异常 " + result.curveFail + " 个属性"; }
         if (result.badCount > 0) { msg += " · " + result.badCount + " 个未生效(点「调试」看明细)"; }
         setStatus(msg);
         if (result.kfCount === 0) { showReport(); }   // 一个关键帧都没打上 → 自动弹报告
+    }
+
+    // ===== 预设导出/导入(v0.2.0)=====
+
+    function projectFileDir() {
+        try {
+            var pf = app.project.file;
+            if (pf && pf.fsName) {
+                // 取路径的目录部分:纯字符串操作,不用正则字面量
+                // (ExtendScript 解析器对含 \\ 的正则字面量会报语法错误)
+                var s = String(pf.fsName);
+                var idx = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
+                if (idx >= 0) { return s.substring(0, idx); }
+                return s;
+            }
+        } catch (e) {}
+        return "~";
+    }
+
+    // 导出:全部当前预设(内置 + 已导入)→ JSON(默认当前工程目录,UTF-8)
+    function exportPresets() {
+        try {
+            var f = File.saveDialog("导出曲线预设 (JSON)",
+                "JSON 文件:*.json;*.*", projectFileDir() + "/quickkey_presets.json");
+            if (!f) { return; }   // 用户取消
+            f.encoding = "UTF-8";
+            if (!f.open("w")) { setStatus("导出失败:无法写入文件"); return; }
+            f.write(stringifyPresets(state.curve.presets));   // 自包含序列化(v0.2.1)
+            f.close();
+            setStatus("已导出 " + state.curve.presets.length + " 个预设 → " + f.fsName);
+        } catch (e) {
+            setStatus("导出失败:" + errMsg(e));
+        }
+    }
+
+    // 导入:读 JSON → 校验 → 合并(同名覆盖)→ 重建下拉
+    function importPresets() {
+        try {
+            var f = File.openDialog("导入曲线预设 (JSON)", "JSON 文件:*.json;*.*");
+            if (!f) { return; }
+            f.encoding = "UTF-8";
+            if (!f.open("r")) { setStatus("导入失败:无法打开文件"); return; }
+            var txt = f.read();
+            f.close();
+            var list = parsePresetsText(txt);   // 自包含解析:全局 JSON 优先,手写回退(v0.2.1)
+            if (!list || list.length === 0) { setStatus("导入失败:文件里没有合法预设"); return; }
+            state.curve.presets = mergePresets(state.curve.presets, list);
+            rebuildPresetDropdowns();
+            setStatus("已导入 " + list.length + " 个预设(共 " + state.curve.presets.length + " 个)");
+        } catch (e) {
+            setStatus("导入失败:" + errMsg(e));
+        }
     }
 
     // ===== UI 层(AE 环境才构建;node 下跳过供测试)=====
@@ -672,6 +1092,40 @@
         var tme = {};    // 时间预览引用
         var rows = [];   // 行控件池(索引 = 槽位 - 1)
 
+        // ---- Tab 键只在数字输入框之间循环(v0.2.7)----
+        // 方案(搜索确认):ScriptUI edittext 支持 onKeyDown 处理器,event.keyName
+        // 判键、event.preventDefault() 有效(Adobe 官方 NumericEditKeyboardHandler 同款),
+        // 控件 .active = true 可设焦点(ExtendScript wiki)。给每个数字框绑 Tab →
+        // 手动聚焦下一个可见/可用的数字框,避开开关/下拉/按钮。
+        var numBoxes = [];   // 所有数字输入框(间隔 + 节点数值 + 曲线段数值),按创建顺序
+
+        function focusNextNum(current) {
+            var n = numBoxes.length;
+            if (n < 2) { return; }
+            var idx = -1;
+            for (var i = 0; i < n; i++) { if (numBoxes[i] === current) { idx = i; break; } }
+            if (idx < 0) { return; }
+            for (var step = 1; step <= n; step++) {
+                var cand = numBoxes[(idx + step) % n];
+                if (cand && cand.visible && cand.enabled) {
+                    cand.active = true;
+                    return;
+                }
+            }
+        }
+
+        function bindNumTab(box) {
+            numBoxes.push(box);
+            box.onKeyDown = function (e) {
+                try {
+                    if (e && e.keyName === "Tab") {
+                        if (e.preventDefault) { e.preventDefault(); }
+                        focusNextNum(box);
+                    }
+                } catch (err) {}
+            };
+        }
+
         function addRow(slot) {
             var row = grpNodes.add("group");
             row.orientation = "row";
@@ -682,11 +1136,13 @@
             lbl[slot].preferredSize.width = 130;
             inp[slot] = row.add("edittext", undefined, String(state.gap[slot]));
             inp[slot].characters = 3;
+            bindNumTab(inp[slot]);
             vin[slot] = [];
             for (var k = 0; k < 3; k++) {
                 (function (slot2, k2) {
                     var box = row.add("edittext", undefined, "");
                     box.characters = 4;
+                    bindNumTab(box);
                     box.onChange = function () {
                         state.val[slot2][k2] = box.text;   // 框对格直写(v0.1.7 数组存储)
                     };
@@ -698,6 +1154,7 @@
             chk[slot].onClick = function () {
                 state.on[slot] = chk[slot].value;
                 refresh();
+                pal.layout.layout(true);   // v0.2.2:开关影响曲线段数,布局即时生效
             };
             inp[slot].onChange = function () {
                 var v = parseInt(inp[slot].text, 10);
@@ -713,6 +1170,150 @@
         function ensureRows() {
             while (rows.length < state.count) { addRow(rows.length + 1); }
             for (var i = 0; i < rows.length; i++) { rows[i].visible = (i + 1) <= state.count; }
+        }
+
+        // ---------- 曲线区(v0.2.0)----------
+
+        // 曲线功能开关行 + 导出/导入
+        var grpCurve = pal.add("group");
+        grpCurve.orientation = "row";
+        grpCurve.alignChildren = ["fill", "center"];
+        grpCurve.spacing = 6;
+        var chkCurve = grpCurve.add("checkbox", undefined, "曲线功能");
+        var btnExport = grpCurve.add("button", undefined, "导出预设");
+        var btnImport = grpCurve.add("button", undefined, "导入预设");
+        chkCurve.onClick = function () {
+            state.curve.enabled = chkCurve.value;
+            refresh();
+            pal.layout.layout(true);
+        };
+        btnExport.onClick = exportPresets;
+        btnImport.onClick = importPresets;
+
+        // 曲线段区(行池:预建 MAX_COUNT-1 行,按段数切换 visible)
+        var grpSegs = pal.add("group");
+        grpSegs.orientation = "column";
+        grpSegs.alignChildren = ["fill", "top"];
+        grpSegs.spacing = 4;
+
+        // 曲线列头:段 | 预设 | x1 y1 x2 y2
+        var segHead = grpSegs.add("group");
+        segHead.orientation = "row";
+        segHead.alignChildren = ["fill", "center"];
+        segHead.spacing = 6;
+        var sh1 = segHead.add("statictext", undefined, "段");
+        sh1.preferredSize.width = 78;
+        var sh2 = segHead.add("statictext", undefined, "预设");
+        sh2.preferredSize.width = 92;
+        var sh3 = segHead.add("statictext", undefined, "x1");
+        sh3.preferredSize.width = 44;
+        var sh4 = segHead.add("statictext", undefined, "y1");
+        sh4.preferredSize.width = 44;
+        var sh5 = segHead.add("statictext", undefined, "x2");
+        sh5.preferredSize.width = 44;
+        var sh6 = segHead.add("statictext", undefined, "y2");
+        sh6.preferredSize.width = 44;
+
+        var segLbl = {};   // 段标签("段1:节点1→2")
+        var segDd = {};    // 预设下拉
+        var segIn = {};    // 4 个输入框(segIn[i][0..3])
+        var segRows = [];  // 段行控件池(索引 = 段序号 - 1)
+
+        // 下拉 items = [自定义] + 全部预设名(v0.2.2:创建行时即全量,懒增长后不会越界)
+        function ddItemsForPresets() {
+            var items = ["自定义"];
+            for (var j = 0; j < state.curve.presets.length; j++) {
+                items.push(state.curve.presets[j].name);
+            }
+            return items;
+        }
+
+        // 下拉选择 → 填 4 空 + 更新段状态
+        function addSegRow(si) {
+            var row = grpSegs.add("group");
+            row.orientation = "row";
+            row.alignChildren = ["fill", "center"];
+            row.spacing = 6;
+            segLbl[si] = row.add("statictext", undefined, "");
+            segLbl[si].preferredSize.width = 78;
+            segDd[si] = row.add("dropdownlist", undefined, ddItemsForPresets());
+            segDd[si].preferredSize.width = 92;
+            segIn[si] = [];
+            for (var d = 0; d < 4; d++) {
+                (function (si2, d2) {
+                    var box = row.add("edittext", undefined, "");
+                    box.characters = 4;
+                    bindNumTab(box);   // v0.2.7:Tab 键参与数字框循环
+                    box.onChange = function () {
+                        var seg = ensureCurveSeg(si2);
+                        var n = parseFloat(box.text);
+                        if (isNaN(n)) { n = 0; box.text = String(n); }
+                        if (d2 === 0) { seg.x1 = n; }
+                        else if (d2 === 1) { seg.y1 = n; }
+                        else if (d2 === 2) { seg.x2 = n; }
+                        else { seg.y2 = n; }
+                        syncSegDropdown(si2);   // 手填 → 匹配预设显示名,否则「自定义」
+                    };
+                    segIn[si2].push(box);
+                })(si, d);
+            }
+            segDd[si].onChange = function () {
+                var name = segDd[si].selection.text;
+                if (name === "自定义") { return; }   // 自定义:保留当前数值
+                var idx = presetIndexByName(state.curve.presets, name);
+                if (idx < 0) { return; }
+                var p = state.curve.presets[idx];
+                var seg = ensureCurveSeg(si);
+                seg.preset = p.name;
+                seg.x1 = p.x1; seg.y1 = p.y1; seg.x2 = p.x2; seg.y2 = p.y2;
+                segIn[si][0].text = String(p.x1);
+                segIn[si][1].text = String(p.y1);
+                segIn[si][2].text = String(p.x2);
+                segIn[si][3].text = String(p.y2);
+                syncSegDropdown(si);
+            };
+            segRows.push(row);
+        }
+
+        // 段下拉与当前 4 值同步:匹配预设 → 显示预设名;否则「自定义」
+        function syncSegDropdown(si) {
+            var seg = ensureCurveSeg(si);
+            var idx = matchPreset(state.curve.presets, seg.x1, seg.y1, seg.x2, seg.y2);
+            if (idx >= 0) {
+                seg.preset = state.curve.presets[idx].name;
+                segDd[si].selection = segDd[si].items[idx + 1];   // items[0] = 自定义
+            } else {
+                seg.preset = "自定义";
+                segDd[si].selection = segDd[si].items[0];
+            }
+        }
+
+        // 重建全部段下拉 items(导入/导出后调用):自定义 + 全部预设
+        function rebuildPresetDropdowns() {
+            for (var i = 1; i <= MAX_COUNT - 1; i++) {
+                if (!segDd[i]) { continue; }
+                var dd = segDd[i];
+                dd.removeAll();
+                dd.add("item", "自定义");
+                for (var j = 0; j < state.curve.presets.length; j++) {
+                    dd.add("item", state.curve.presets[j].name);
+                }
+                syncSegDropdown(i);
+            }
+        }
+
+        // 段行池懒增长(v0.2.2,与节点行 ensureRows 同策略):
+        // 只建到当前需要的段数,不再一次性预建 29 行(145 个原生控件是打开慢的元凶)
+        function ensureSegRows(need) {
+            var added = false;
+            while (segRows.length < need) {
+                addSegRow(segRows.length + 1);
+                added = true;
+            }
+            for (var i = 0; i < segRows.length; i++) {
+                segRows[i].visible = (i + 1) <= need;
+            }
+            return added;
         }
 
         // 打帧 + 调试按钮
@@ -755,6 +1356,29 @@
                     tme[s].text = state.on[s] ? fmtFrames(times[s]) : "关闭";
                 }
             }
+            // 曲线区(v0.2.2):开关行(checkbox + 导出/导入)常驻可见;
+            // 只有段行区随「开关开启 + 非表达式模式」显隐;段行懒增长
+            var curveShow = state.curve.enabled && state.vtype !== 3;
+            grpSegs.visible = curveShow;
+            if (curveShow) {
+                var segList = curveSegments(state.on, state.count);
+                var needNew = ensureSegRows(segList.length);
+                if (needNew) { pal.layout.layout(true); }
+                for (var si = 1; si <= segList.length; si++) {
+                    var srow = segRows[si - 1];
+                    srow.visible = true;
+                    segLbl[si].text = "段" + si + ":节点" + segList[si - 1][0] + "→" + segList[si - 1][1];
+                    var seg = ensureCurveSeg(si);
+                    segIn[si][0].text = String(seg.x1);
+                    segIn[si][1].text = String(seg.y1);
+                    segIn[si][2].text = String(seg.x2);
+                    segIn[si][3].text = String(seg.y2);
+                    syncSegDropdown(si);
+                }
+            } else {
+                // 曲线关/表达式模式:隐藏已建的段行
+                for (var hi = 0; hi < segRows.length; hi++) { segRows[hi].visible = false; }
+            }
         }
 
         // 模式切换
@@ -772,7 +1396,7 @@
         };
 
         ensureRows();
-        refresh();
+        refresh();   // 曲线段行懒增长:refresh() 里按需建(不再一次性预建 29 行)
 
         if (pal instanceof Window) { pal.center(); pal.show(); }
         else { pal.layout.layout(true); }
@@ -787,6 +1411,18 @@
             buildPlan: buildPlan,
             planHasExplicit: planHasExplicit,
             propDimCore: propDimCore,
+            matchPreset: matchPreset,
+            curveSegments: curveSegments,
+            mergePresets: mergePresets,
+            validatePresets: validatePresets,
+            isLinearPreset: isLinearPreset,
+            bezierToEase: bezierToEase,   // v0.2.12:bezier→AE 缓动转换(纯函数)
+            valDiff: valDiff,
+            setKeyAt: setKeyAt,   // v0.2.11:打帧即得索引(addKey),导出供 mock 核验
+            applySegCurves: applySegCurves,   // v0.2.4:导出供 node mock 核验调用序列
+            stringifyPresets: stringifyPresets,
+            extractPresetsFallback: extractPresetsFallback,
+            parsePresetsText: parsePresetsText,
             MODE_NAMES: MODE_NAMES
         };
     }

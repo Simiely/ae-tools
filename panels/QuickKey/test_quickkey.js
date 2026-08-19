@@ -5,6 +5,18 @@
 var QK = require("./QuickKey.jsx");
 var failures = 0;
 
+// v0.2.4:mock AE 全局(applySegCurves 运行时才引用,require 前设置)
+// v0.2.8:mock 也模拟真实约束——influence 合法范围 [0.1..100](官方文档),
+// 越界直接抛错(和 AE 一致),让"influence=0 构造抛错"这类 bug 在测试里暴露
+global.KeyframeEase = function (speed, influence) {
+    if (influence < 0.1 || influence > 100) {
+        throw new Error("KeyframeEase influence out of range [0.1..100]: " + influence);
+    }
+    this.speed = speed;
+    this.influence = influence;
+};
+global.KeyframeInterpolationType = {LINEAR: 0, BEZIER: 1};
+
 function eq(name, actual, expected) {
     var a = JSON.stringify(actual);
     var e = JSON.stringify(expected);
@@ -120,5 +132,224 @@ eq("非变换3D点(6413)→3", QK.propDimCore("My Effect Point", 6413, false), 3
 eq("分离位置X(6413,isSep)→1", QK.propDimCore("ADBE Position", 6413, false, true), 1);
 eq("分离缩放X(6414,isSep)→1", QK.propDimCore("ADBE Scale", 6414, false, true), 1);
 
-console.log(failures === 0 ? "ALL PASS (" + 50 + " assertions)" : failures + " FAILURES");
+// ---- 曲线纯函数(v0.2.0):matchPreset / isLinearPreset / curveSegments / mergePresets / validatePresets / valDiff ----
+eq("isLinear 线性", QK.isLinearPreset(0, 0, 1, 1), true);
+eq("isLinear 缓入非线", QK.isLinearPreset(0.42, 0, 1, 1), false);
+
+var P4 = [
+    {name: "线性",     x1: 0,    y1: 0,    x2: 1,    y2: 1},
+    {name: "缓入",     x1: 0.42, y1: 0,    x2: 1,    y2: 1},
+    {name: "缓出",     x1: 0,    y1: 0,    x2: 0.58, y2: 1},
+    {name: "缓入缓出", x1: 0.42, y1: 0,    x2: 0.58, y2: 1}
+];
+eq("matchPreset 线性", QK.matchPreset(P4, 0, 0, 1, 1), 0);
+eq("matchPreset 缓入缓出", QK.matchPreset(P4, 0.42, 0, 0.58, 1), 3);
+eq("matchPreset 浮点容差(0.4200001)", QK.matchPreset(P4, 0.4200001, 0, 0.58, 1), 3);
+eq("matchPreset 不匹配 → -1", QK.matchPreset(P4, 0.5, 0.5, 0.5, 0.5), -1);
+eq("matchPreset 空列表 → -1", QK.matchPreset([], 0, 0, 1, 1), -1);
+
+eq("curveSegments 全开5", QK.curveSegments(ALL, 5), [[1, 2], [2, 3], [3, 4], [4, 5]]);
+eq("curveSegments 关节点2 → 1→3直连", QK.curveSegments(off2, 5), [[1, 3], [3, 4], [4, 5]]);
+eq("curveSegments 关节点3/5", QK.curveSegments({1: true, 2: true, 3: false, 4: true, 5: false}, 5), [[1, 2], [2, 4]]);
+eq("curveSegments 只开1个 → 0段", QK.curveSegments({1: true, 2: false, 3: false}, 3), []);
+eq("curveSegments N=7 全开", QK.curveSegments(ALLN, 7), [[1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7]]);
+
+var orig = [{name: "线性", x1: 0, y1: 0, x2: 1, y2: 1}];
+var imp1 = [{name: "线性", x1: 0.1, y1: 0.2, x2: 0.8, y2: 1}, {name: "回弹", x1: 0.2, y1: 1.4, x2: 0.7, y2: 0.6}];
+var merged = QK.mergePresets(orig, imp1);
+eq("mergePresets 同名覆盖 + 追加", merged, [
+    {name: "线性", x1: 0.1, y1: 0.2, x2: 0.8, y2: 1},
+    {name: "回弹", x1: 0.2, y1: 1.4, x2: 0.7, y2: 0.6}
+]);
+eq("mergePresets 不改原数组", orig, [{name: "线性", x1: 0, y1: 0, x2: 1, y2: 1}]);
+eq("mergePresets 深拷贝不共享引用", (merged[0] !== orig[0]), true);
+
+eq("validatePresets 标准格式", QK.validatePresets({version: 1, presets: imp1}), [
+    {name: "线性", x1: 0.1, y1: 0.2, x2: 0.8, y2: 1},
+    {name: "回弹", x1: 0.2, y1: 1.4, x2: 0.7, y2: 0.6}
+]);
+eq("validatePresets 裸数组", QK.validatePresets([{name: "A", x1: 0, y1: 0, x2: 1, y2: 1}]), [
+    {name: "A", x1: 0, y1: 0, x2: 1, y2: 1}
+]);
+eq("validatePresets 过滤非法(x2>1)", QK.validatePresets({presets: [
+    {name: "ok", x1: 0, y1: 0, x2: 1, y2: 1},
+    {name: "bad-x", x1: 0, y1: 0, x2: 1.5, y2: 1},
+    {name: "", x1: 0, y1: 0, x2: 1, y2: 1},
+    {name: "bad-nan", x1: "a", y1: 0, x2: 1, y2: 1},
+    {name: "no-nums", x1: 0, y1: 0, x2: 1}
+]}), [{name: "ok", x1: 0, y1: 0, x2: 1, y2: 1}]);
+eq("validatePresets 格式错误 → null", QK.validatePresets("hello"), null);
+eq("validatePresets null → null", QK.validatePresets(null), null);
+eq("validatePresets y 可超1(回弹)", QK.validatePresets({presets: [{name: "弹", x1: 0.2, y1: 1.4, x2: 0.7, y2: 0.6}]}), [
+    {name: "弹", x1: 0.2, y1: 1.4, x2: 0.7, y2: 0.6}
+]);
+
+eq("valDiff 数字", QK.valDiff(100, 40), 60);
+eq("valDiff 数组最大维差", QK.valDiff([100, 100], [50, 80]), 50);
+eq("valDiff 同值 → 0", QK.valDiff([50, 50], [50, 50]), 0);
+eq("valDiff 类型不匹配 → 0", QK.valDiff(100, [50, 80]), 0);
+
+// ---- 迷你 JSON(v0.2.1):stringifyPresets / parsePresetsText / extractPresetsFallback ----
+var PEX = [
+    {name: "线性", x1: 0, y1: 0, x2: 1, y2: 1},
+    {name: "回弹", x1: 0.2, y1: 1.4, x2: 0.7, y2: 0.6}
+];
+var PEX_JSON = QK.stringifyPresets(PEX);
+eq("stringifyPresets 含字段", (PEX_JSON.indexOf('"name": "线性"') >= 0
+    && PEX_JSON.indexOf('"x1": 0') >= 0 && PEX_JSON.indexOf('"y1": 1.4') >= 0
+    && PEX_JSON.indexOf('"x2": 0.7') >= 0 && PEX_JSON.indexOf('"y2": 0.6') >= 0), true);
+eq("stringifyPresets 是标准 JSON(node 可解析)", JSON.parse(PEX_JSON).presets.length, 2);
+eq("parsePresetsText round-trip(node 走 JSON 分支)", QK.parsePresetsText(PEX_JSON), PEX);
+eq("extractPresetsFallback 手写分支", QK.extractPresetsFallback(PEX_JSON), PEX);
+eq("extractPresetsFallback 空 → null", QK.extractPresetsFallback("no json here"), null);
+eq("extractPresetsFallback 过滤非法", QK.extractPresetsFallback(
+    '{"presets": [{"name":"ok","x1":0,"y1":0,"x2":1,"y2":1},'
+    + '{"name":"bad-x","x1":0,"y1":0,"x2":1.5,"y2":1}]}'
+), [{name: "ok", x1: 0, y1: 0, x2: 1, y2: 1}]);
+eq("parsePresetsText 垃圾 → null", QK.parsePresetsText("???not json???"), null);
+
+// ---- applySegCurves 调用序列核验(v0.2.4/0.2.6,mock prop 记录调用) ----
+// v0.2.6:mock 也校验 setTemporalEaseAtKey 的【数组参数】(官方 API 要求
+// 1D/2D/3D 属性分别传 1/2/3 个 KeyframeEase——之前传单个对象是真机不生效的根因)
+function mockProp(failEase) {
+    var log = {interp: [], ease: [], key: []};
+    var keys = [];   // 模拟关键帧 [{time, value}]
+    return {
+        log: log,
+        propertyValueType: 6417,          // OneD(1 维,旋转)
+        matchName: "ADBE Rotate Z",
+        value: 0,
+        numKeys: 0,
+        keyframeTime: function (k) { return keys[k - 1].time; },
+        addKey: function (t) { keys.push({time: t, value: 0}); return keys.length; },   // 官方:返回新帧索引
+        setValueAtKey: function (idx, wv) {
+            keys[idx - 1].value = wv;
+            log.key.push({idx: idx, v: wv});
+        },
+        setValueAtTime: function (t, wv) { keys.push({time: t, value: wv}); return keys.length; },
+        nearestKeyIndex: function (t) { return 0; },   // findKeyIndex 兜底用(mock: 找不到)
+        setInterpolationTypeAtKey: function (idx) { log.interp.push(idx); },
+        setTemporalEaseAtKey: function (idx, ei, eo) {
+            if (failEase) { throw new Error("mock ease 调用失败"); }
+            log.ease.push({
+                idx: idx,
+                eiLen: ei ? ei.length : 0,
+                eiInf: ei && ei[0] ? ei[0].influence : null,
+                eiSpd: ei && ei[0] ? ei[0].speed : null,
+                eoLen: eo ? eo.length : 0,
+                eoInf: eo && eo[0] ? eo[0].influence : null,
+                eoSpd: eo && eo[0] ? eo[0].speed : null
+            });
+        }
+    };
+}
+// 3 帧(idx 1/2/3)+ 2 段;值 0→100→200、时差 1s → 平均速度 avg=100
+// v0.2.9 社区公式验证:X→影响(钳 0.1~100)、Y→速度(×avg 归一化)
+var F3 = [{t: 0, v: 0, idx: 1}, {t: 1, v: 100, idx: 2}, {t: 2, v: 200, idx: 3}];
+var mp1 = mockProp();
+var r1 = QK.applySegCurves(mp1, F3, [
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1},   // 缓入缓出
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1}
+]);
+eq("applySegCurves 全缓入缓出 applied=3", r1.applied, 3);
+eq("applySegCurves 全缓入缓出 插值全 BEZIER", mp1.log.interp, [1, 2, 3]);
+eq("applySegCurves 全缓入缓出 ease(影响=X、速度=Y)", mp1.log.ease, [
+    {idx: 1, eiLen: 1, eiInf: 0.1, eiSpd: 0, eoLen: 1, eoInf: 42, eoSpd: 0},    // 帧1:入中性,出影响 x1×100=42
+    {idx: 2, eiLen: 1, eiInf: 42, eiSpd: 0, eoLen: 1, eoInf: 42, eoSpd: 0},     // 帧2:入影响 (1−0.58)×100=42
+    {idx: 3, eiLen: 1, eiInf: 42, eiSpd: 0, eoLen: 1, eoInf: 0.1, eoSpd: 0}     // 末帧:出中性
+]);
+var mp2 = mockProp();
+var r2 = QK.applySegCurves(mp2, F3, [
+    {x1: 0, y1: 0, x2: 1, y2: 1},   // 线性
+    {x1: 0, y1: 0, x2: 1, y2: 1}
+]);
+eq("applySegCurves 全线性 完全不动", (r2.applied === 0 && r2.missed === 0 && mp2.log.interp.length === 0 && mp2.log.ease.length === 0), true);
+var mp3 = mockProp();
+var r3 = QK.applySegCurves(mp3, F3, [
+    {x1: 0.42, y1: 0, x2: 1, y2: 1},  // 缓入
+    {x1: 0, y1: 0, x2: 1, y2: 1}      // 线性(混合场景,核验修复:线性侧不污染)
+]);
+eq("applySegCurves 缓入+线性 applied=2", r3.applied, 2);
+eq("applySegCurves 缓入+线性 插值 1/2(帧3 线性跳过)", mp3.log.interp, [1, 2]);
+eq("applySegCurves 缓入+线性 ease(帧3 线性不被污染)", mp3.log.ease, [
+    {idx: 1, eiLen: 1, eiInf: 0.1, eiSpd: 0, eoLen: 1, eoInf: 42, eoSpd: 0},    // 帧1:出影响 42
+    {idx: 2, eiLen: 1, eiInf: 0.1, eiSpd: 100, eoLen: 1, eoInf: 0.1, eoSpd: 0}  // 帧2:入=x2=1→影响0.1/速度退avg
+]);
+var mp4 = mockProp();
+var r4 = QK.applySegCurves(mp4, F3, [
+    {x1: 0, y1: 0, x2: 1, y2: 1},
+    {x1: 0.42, y1: 0, x2: 1, y2: 1}
+]);
+eq("applySegCurves 线性+缓入 applied=2", r4.applied, 2);
+eq("applySegCurves 线性+缓入 ease(帧1 不动)", mp4.log.ease, [
+    {idx: 2, eiLen: 1, eiInf: 0.1, eiSpd: 0, eoLen: 1, eoInf: 42, eoSpd: 0},     // 帧2:出=段2 出影响 42
+    {idx: 3, eiLen: 1, eiInf: 0.1, eiSpd: 100, eoLen: 1, eoInf: 0.1, eoSpd: 0}  // 帧3:入=x2=1→影响0.1/速度退avg
+]);
+var mp5 = mockProp();
+var r5 = QK.applySegCurves(mp5, [{t: 0, v: 0, idx: 0}, {t: 1, v: 100, idx: 2}], [
+    {x1: 0.42, y1: 0, x2: 1, y2: 1}
+]);
+eq("applySegCurves idx=0 → missed", (r5.applied === 1 && r5.missed === 1), true);
+eq("applySegCurves idx=0 → missIdx 计数", r5.missIdx, 1);
+
+// v0.2.10:missed 细分——调用异常(mock setTemporalEaseAtKey 抛错)
+var mp6 = mockProp(true);
+var r6 = QK.applySegCurves(mp6, F3, [
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1},   // 缓入缓出
+    {x1: 0.42, y1: 0, x2: 0.58, y2: 1}
+]);
+eq("applySegCurves 调用异常 applied=0", r6.applied, 0);
+eq("applySegCurves 调用异常 missErr=3", r6.missErr, 3);
+eq("applySegCurves 调用异常 missIdx=0(非索引问题)", r6.missIdx, 0);
+eq("applySegCurves 调用异常 missErrMsg 带文本", (r6.missErrMsg !== ""), true);
+
+// ---- setKeyAt(v0.2.11):打帧即得索引(官方 addKey 方案,消灭"打完再找") ----
+// 场景1:无已有帧 → addKey 创建并返回索引,setValueAtKey 设值
+var sk1 = mockProp();
+var sk1idx = QK.setKeyAt(sk1, 0.5, 100);
+eq("setKeyAt 无已有帧 addKey 返回索引=1", sk1idx, 1);
+eq("setKeyAt 无已有帧 setValueAtKey 设值", sk1.log.key, [{idx: 1, v: 100}]);
+
+// 场景2:已有帧(容差 0.05 内)→ 复用索引,不调 addKey
+var sk2 = {
+    numKeys: 1,
+    keyframeTime: function (k) { return 0.5; },
+    addKey: function (t) { throw new Error("不应调用 addKey"); },
+    setValueAtKey: function (idx, wv) { this._idx = idx; this._v = wv; }
+};
+var sk2idx = QK.setKeyAt(sk2, 0.52, 200);
+eq("setKeyAt 已有帧 复用索引=1", sk2idx, 1);
+eq("setKeyAt 已有帧 setValueAtKey(1,200)", (sk2._idx === 1 && sk2._v === 200), true);
+
+// 场景3:keyframeTime 遍历抛错 → addKey 兜底拿索引
+var sk3 = {
+    numKeys: 1,
+    keyframeTime: function (k) { throw new Error("numKeys 异常"); },
+    addKey: function (t) { return 5; },
+    setValueAtKey: function (idx, wv) { this._idx = idx; this._v = wv; }
+};
+var sk3idx = QK.setKeyAt(sk3, 0.5, 300);
+eq("setKeyAt keyframeTime 抛错 → addKey 兜底返回 5", sk3idx, 5);
+eq("setKeyAt 兜底 setValueAtKey(5,300)", (sk3._idx === 5 && sk3._v === 300), true);
+
+// ---- bezierToEase(v0.2.12 重写,纯转换函数,公式集中一处) ----
+// 缓入缓出(0.42 0 0.58 1,avg=100):X→影响 42、Y→速度 0(两头静止)
+eq("bezierToEase 缓入缓出", QK.bezierToEase(0.42, 0, 0.58, 1, 100), {
+    out: {speed: 0, influence: 42},
+    inE: {speed: 0, influence: 42}
+});
+// 线性(0 0 1 1)→ null(两侧中性,保持 AE 默认线性)
+eq("bezierToEase 线性 → null", QK.bezierToEase(0, 0, 1, 1, 100), null);
+// 缓入(0.42 0 1 1):出影响 42/速度 0;入侧 x2=1 除零退 avg=100、影响钳 0.1
+eq("bezierToEase 缓入", QK.bezierToEase(0.42, 0, 1, 1, 100), {
+    out: {speed: 0, influence: 42},
+    inE: {speed: 100, influence: 0.1}
+});
+// 缓出(0 0 0.58 1):出侧 x1=0 除零退 avg=100、影响钳 0.1;入影响 (1−0.58)×100=42
+eq("bezierToEase 缓出", QK.bezierToEase(0, 0, 0.58, 1, 100), {
+    out: {speed: 100, influence: 0.1},
+    inE: {speed: 0, influence: 42}
+});
+
+console.log(failures === 0 ? "ALL PASS (" + 105 + " assertions)" : failures + " FAILURES");
 process.exit(failures === 0 ? 0 : 1);

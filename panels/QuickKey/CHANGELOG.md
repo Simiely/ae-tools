@@ -1,5 +1,145 @@
 # 更新日志(CHANGELOG)
 
+## v0.2.13(2026-08-19)— 修复真机「非法使用保留字」:对象属性名不能用 in
+
+- v0.2.12 重写后真机报「行 237 无法执行脚本。非法使用保留字」——`bezierToEase`
+  返回对象用了 `in:` 作为属性名,**`in` 是 ES3 保留字**(运算符),ExtendScript
+  解析器直接拒绝;node(V8)允许保留字做属性名,node --check 拦不住
+  (与 v0.2.1 正则 `\\` 同一类"node 通过但 AE 崩"的坑)
+- 修复:`in:` → `inE:`,同步调用处(applySegCurves 的 conv.inE)与测试期望;
+  全文件扫描确认无其他保留字属性名
+- 105 断言全过(行为零变化);语法 ✓ BOM ✓ 已部署
+
+## v0.2.12(2026-08-19)— 曲线逻辑重写:三层职责分离,消除补丁缠绕
+
+- 用户反馈:曲线逻辑经过 8 轮补丁(v0.2.3/0.2.4/0.2.6/0.2.8/0.2.9/0.2.10/0.2.11)
+  已严重缠绕,要求梳理后重写
+- 重写后的曲线模块三层职责:
+  - **纯转换层**(新,node 可测):`bezierToEase(x1,y1,x2,y2,avg)`——bezier→AE
+    缓动公式集中一处(原散在 applySegCurves 内联 + 28 行注释),线性返回 null
+  - **AE 应用层**:`applySegCurves` 瘦身——逐段调 bezierToEase,缓动按【帧索引】
+    直存 inEase[k]/outEase[k](原段下标数组 + 换算语义绕),逐帧转 BEZIER + 设缓动
+  - **打帧层**:`setKeyAt` 保持不动(v0.2.11 addKey 方案已验证)
+- 行为零变化:全部既有 mock 用例等价通过;新增 bezierToEase 4 项断言
+  (缓入缓出/线性→null/缓入/缓出),101→105 断言全过
+- 语法 ✓ BOM ✓ 已部署
+
+## v0.2.11(2026-08-19)— 打帧改 addKey 方案:创建即得索引,消灭"打完再找"
+
+- 真机报告「曲线应用: 0 帧套上 · 3 帧未匹配(3 索引无效)」→ 诊断生效,锁定
+  是"打帧后按时间找索引"环节失败(手写循环 + nearestKeyIndex 兜底都未命中)
+- 搜索官方文档(权威):**`Property.addKey(time)` 创建关键帧并直接返回其索引**
+  ("Adds a new keyframe... returns the index of the new keyframe")
+- 社区脚本大神 Paul Tuersley 确认:AE 关键帧放置存在已知精度问题(可能落在
+  帧与帧之间)——这正是"打完再按时间匹配找索引"不可靠的根源
+- 修复:打帧从 `setValueAtTime + findKeyIndex(打完找)` 改为 **`setKeyAt`**:
+  ①先按时间找已有帧(容差放宽 0.03→0.05s)复用其索引 ②无则 `addKey(t)`
+  直接拿索引 ③`setValueAtKey` 设值 ④addKey 异常兜底 setValueAtTime+numKeys
+- 索引从"查找"变"创建即得",不存在找不到的问题;曲线套用直接用 addKey 返回的索引
+- mock 升级:mockProp 模拟 numKeys/keyframeTime/addKey/setValueAtKey;
+  新增 6 项断言(无帧 addKey / 已有帧复用 / keyframeTime 抛错兜底),101 断言全过
+- 语法 ✓ BOM ✓ 已部署
+
+## v0.2.10(2026-08-19)— 曲线"未匹配"细分诊断 + nearestKeyIndex 兜底
+
+- 真机报告「曲线应用: 0 帧套上缓动 · 3 帧未匹配」(KeyframeEase 构造已过,卡在逐帧设置):
+  - 查官方文档确认 `setInterpolationTypeAtKey(keyIndex, inType[, outType])` 与
+    `setTemporalEaseAtKey` 签名均合法 → 排除签名问题
+  - 手写 `findKeyIndex` 循环未命中时,**用官方 `nearestKeyIndex(t)` 兜底**(专为按时间找最近帧设计)
+  - missed 细分两类:missIdx(帧索引无效)+ missErr(调用抛错,带回首个错误文本),
+    报告直接显示「未匹配(3 索引无效)」或「未匹配(3 调用异常)[错误信息]」,不再含糊
+- mock 测试升级:mockProp 加 nearestKeyIndex(模拟)+ failEase 抛错模式;
+  新增 4 项断言(调用异常 applied/missErr/missIdx/missErrMsg),95 断言全过
+- 语法 ✓ BOM ✓ 已部署
+
+## v0.2.9(2026-08-19)— bezier→AE 映射公式修正(X/Y 用反,用户质疑定位)
+
+- 用户质疑"理论上填 0~1,你找的参数是 0.1~100,范围不对,可能用了别的参数" → 深挖社区:
+  - **结论:能真实模拟 0~1 bezier**——AE 关键帧贝塞尔与 cubic-bezier 数学同源(三次贝塞尔),正确映射三方交叉验证一致(AE 社区 ascii husky 被采纳回答 / GraphicDesign SE / Spine 官方导出脚本):
+    - **X 坐标 → 影响**:出影响 = x1×100、入影响 = (1−x2)×100(钳 0.1~100)
+    - **Y 坐标 → 速度**:出速度 = y1×平均速度/x1、入速度 = (1−y2)×平均速度/(1−x2)
+    - 平均速度 = 段值差/时差(归一化);x=0 / x2=1 除零时退平均速度
+  - **原实现错误:把 X/Y 用反**(拿 y 当影响、平均速度硬当速度)——这就是"范围对不上"的根源
+  - 线性(0 0 1 1)→ 影响≈0;缓入缓出(0.42 0 0.58 1)→ 出/入影响 42、速度 0(两头静止)✓ 几何正确
+  - FLOW 等商业插件(aescripts.com/flow)即用此类映射
+- 影响四舍五入 1 位小数(消浮点误差);mock 断言加速度值校验
+- 91 断言不变,全过;语法 ✓ BOM ✓ 已部署
+
+## v0.2.8(2026-08-19)— 曲线应用"1 个属性异常"根因:KeyframeEase influence 范围
+
+- 用户报告「曲线: 缓入缓出 / 缓入缓出 · 曲线应用: 0 帧套上缓动 · 1 个属性异常」——曲线确认开启,但 applySegCurves 整体抛异常
+- **官方文档核验:KeyframeEase(speed, influence) 的 influence 合法范围 [0.1..100.0]**:
+  - `new KeyframeEase(0, 0)`(NEUTRAL)influence=0 越界 → 构造抛错,且发生在函数内部 try 块之外 → 整段曲线应用失败
+  - 内置预设 y1 全为 0 → easeOut 的 influence=0 → 同样抛错
+- 修复:中性/出侧 influence 一律钳到 0.1(0.1%≈线性,视觉无差别);mock KeyframeEase 加范围校验模拟真实行为(同类 bug 测试即暴露);报告附曲线异常信息(errMsg)
+- 91 断言不变,全过;语法 ✓ BOM ✓ 已部署
+
+## v0.2.7(2026-08-19)— Tab 键只在数字输入框之间循环
+
+- 用户需求:输入数值时 Tab 只在数值框之间切换,不跳到开关/下拉/按钮
+- 方案(先搜索确认 ScriptUI 能力):edittext 支持 onKeyDown(Adobe 官方 NumericEditKeyboardHandler 同款)、`event.keyName` 判键、`event.preventDefault()` 有效、控件 `.active = true` 设焦点(ExtendScript wiki)
+- 实现:所有数字输入框(间隔 + 节点数值 + 曲线段 x1y1x2y2)注册到 numBoxes 列表,onKeyDown 拦 Tab → 手动聚焦下一个**可见且可用**的数字框(循环);非数字控件不受影响
+- 91 断言不变,全过;语法 ✓ BOM ✓ 已部署
+
+## v0.2.6(2026-08-19)— 官方文档核验:setTemporalEaseAtKey 参数是数组
+
+- 用户反馈打帧报告无曲线行 + 仍线性 → 先查清:报告没有「曲线:」行 = 曲线功能未勾选(防呆:报告新增「曲线: 未开启(勾选「曲线功能」后生效)」提示)
+- **拉 Adobe 官方文档(ae-scripting.docsforadobe.dev)核验 setTemporalEaseAtKey**:
+  - 签名 `setTemporalEaseAtKey(keyIndex, inTemporalEase, outTemporalEase)`
+  - **缓动参数是【数组】**:1D 属性 1 个 KeyframeEase、2D 2 个、3D 3 个——之前传单个对象是曲线不生效的根因(报错被 try/catch 吞掉计入未匹配)
+  - 修复:applySegCurves 按 propDimOf 维度把缓动包成数组;mock 测试同步校验数组长度与参数
+- 91 断言不变,全过;语法 ✓ BOM ✓ 已部署
+
+## v0.2.5(2026-08-18)— 注释精简 + 代码地图
+
+- 用户问"代码这么长可以拆分吗" → 评估结论:ScriptUI 无模块系统,#include 是文本拼接会破坏 node 测试链与部署机制,单文件 IIFE 是行业惯例 → 选择**精简注释**方案:
+  - 版本头注释 178 → 39 行(逐版本变更记录已全部存在于 CHANGELOG/DEVELOPMENT,头部只留当前要点)
+  - 头部新增**代码地图**:按函数名索引全部 8 个分区,不依赖行号(编辑漂移免疫)
+  - 文件 1457 → 1319 行(-138 行),逻辑零改动
+- 91 断言不变,全过;语法 ✓ BOM ✓ 已部署
+
+## v0.2.4(2026-08-18)
+
+- **核验修复线性段缓动污染**(用户:还没试,先核验;mock 模拟执行发现):
+  - 核验发现:v0.2.3 近似公式「入影响 = y2×100%」对线性段(0 0 1 1)y2=1 会算出 100 影响(应为 0);内置预设 y2 全是 1,**线性段+非线性段混合时线性侧被错误套上缓动**(如段1 缓入、段2 线性 → 末帧被设入 100)
+  - 修复:线性段两侧缓动一律置中性(影响 0),帧侧「两侧都中性」才跳过——全线性完全不动、混合场景线性侧保持线性
+  - 新增 **node mock 核验**(10 断言):mock KeyframeEase/KeyframeInterpolationType/prop,验证 applySegCurves 调用序列与参数(全缓入缓出/全线性/缓入+线性/线性+缓入/idx 缺失)
+- 回归测试扩至 **91 断言**;语法 ✓ BOM ✓ 已部署
+
+## v0.2.3(2026-08-18)
+
+- **修复曲线套用不生效**(用户:选「缓入缓出」打出来还是线性):
+  - 根因①:`setValueAtTime` 打的帧默认插值 **LINEAR**,`setTemporalEaseAtKey` 只设缓动不转插值 → 曲线不生效。修复:非线性的帧先 `setInterpolationTypeAtKey(BEZIER)` 再设缓动;线性段跳过保持默认
+  - 根因②:打完后时间匹配找关键帧索引,0.002s 容差在播放头停在非帧边界时匹配失败 → 全部跳过。修复:打帧时立即记录索引(findKeyIndex 放宽到最近 ±0.03s),曲线直接用它
+  - 报告/状态栏加曲线应用统计(套上 N 帧 / 未匹配 N 帧 / 异常 N 属性),不再"无声线性"
+- 回归测试 81 断言不变,全过
+
+## v0.2.2(2026-08-18)
+
+- **修复曲线区 UI 不可见 + 面板打开慢**(用户:UI 上看不到曲线开关、打开比较久):
+  - 「曲线功能」开关行(checkbox + 导出/导入按钮)**常驻可见**——之前整个曲线组按开关状态隐藏,开关默认关导致入口消失,用户永远勾不到
+  - 曲线段行池改**懒增长**(`ensureSegRows`,与节点行池一致):删除一次性预建 29 行(145 个原生控件,ScriptUI 创建开销大 = 打开慢的元凶),默认只建当前段数,refresh 只遍历当前段数
+  - 节点开关 onClick 补 `layout(true)`,段行数变化即时生效;段行下拉创建时即带全量预设 items
+- 回归测试 81 断言不变,全过
+
+## v0.2.1(2026-08-18)
+
+- **修复真机语法错误**(AE 报「行 794 无法执行脚本 · 语法错误」,node --check 拦不住):
+  - 根因①:`projectFileDir` 用了含 `\\` 的正则字面量 `/[^/\\]*$/`——ExtendScript 解析器对字符类中的双反斜杠报语法错误(V8 能过)。改为纯字符串操作(lastIndexOf),并排查全文件正则字面量
+  - 根因②(顺手消除):**JSON.stringify/parse 不是 ExtendScript 原生内置**(ECMA-262 v3;依赖全局 JSON 会因机器而异,只有开了 Adobe Libraries 面板等才有泄漏的 JSON)。新增 ES3 自包含迷你 JSON:`stringifyPresets`(标准 JSON 文本,便于手编)/ `parsePresetsText`(优先全局 JSON.parse,失败退回 `extractPresetsFallback` 手写提取),全程零正则字面量
+  - 回归测试扩至 **81 断言**(stringifyPresets / parsePresetsText / extractPresetsFallback)
+
+## v0.2.0(2026-08-18)
+
+- **曲线功能(用户确认方案:预设下拉 + 4 数值 + 导出导入)**:
+  - 「曲线功能」开关:每两个**开启的相邻节点**之间 = 一段曲线(5 节点全开 = 4 段;关闭节点断开链条,段随开关自动重排)
+  - 每段:预设下拉(自定义 + 内置 4 个 + 导入的)+ **x1 y1 x2 y2 四个输入**(cubic-bezier)
+  - **选预设 → 自动填 4 空**;手填数字 → 数值匹配某预设显示预设名,否则「自定义」
+  - 内置预设:线性 `0 0 1 1` / 缓入 `0.42 0 1 1` / 缓出 `0 0 0.58 1` / 缓入缓出 `0.42 0 0.58 1`
+  - **导出/导入预设**:导出全部预设(内置 + 已导入)→ JSON(默认当前工程目录,UTF-8);导入合并同名覆盖,下拉立即可选
+  - 打帧自动套用曲线(`setTemporalEaseAtKey` 近似:左帧出影响=y1×100%、右帧入影响=y2×100%、速度=段平均速度);线性段 = AE 默认线性;表达式模式隐藏曲线区
+  - 回归测试扩至 **74 断言**(matchPreset / curveSegments / mergePresets / validatePresets / isLinearPreset / valDiff)
+
 ## v0.1.18(2026-08-18)
 
 - **维度判断补两个缺口**(盘点所有判断方式后):
