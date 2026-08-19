@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**:2026-08-19(v0.3.10)
+> 📌 **文档基线**:2026-08-19(v0.3.11)
 > **更新文档/代码后,请更新此行**(日期 + 新 commit hash),并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
@@ -60,6 +60,7 @@
 10. **行池复用 + 懒增长,不重建、不全量预建**:节点行 `ensureRows`、曲线段行 `ensureSegRows` 都只补到当前需要数量(曲线段数 = 开启相邻对数);**禁止一次性预建 MAX_COUNT-1=29 行**(每行 5 个原生 ScriptUI 控件,145 控件创建开销大 = 面板打开慢,v0.2.2 实测);checkbox/输入框的 onClick/onChange 闭包捕获 slot(用 IIFE 包住,别用循环变量);锚点行数值输入恒可用,间隔输入隐藏;行数变化后必须 `pal.layout.layout(true)`(节点开关 onClick、曲线开关 onClick、ensureSegRows 新增行时都要)
 11. **锚点槽位随 N 变化**:`anchorPos(mode, n)` = 起始 1 / 中间 ⌈N/2⌉ / 末尾 N;改节点数后必须 `ensureRows()` + `refresh()` + `pal.layout.layout(true)` 三连,否则新行不显示或布局错乱
 12. **resizeState 只补默认不删值**:节点数缩容再扩容,旧槽位开关/间隔/数值保留(补新槽位默认 on=true、gap=5、val="")
+12b. **refresh 必须把 state 同步回所有控件(v0.3.11)**:任何「改 state → refresh()」单向流(使用存储/复位/导入配置/载入槽位)都走 refreshHeader/refreshCurve,这两个函数必须同步**所有从 state 读取**的控件——模式下拉 `ddMode`、节点数框 `cntInp`、数值类型下拉 `ddType`、表达式框 `exprInp`、曲线总开关 `chkCurve`、端点平滑 `chkSmooth`(v0.3.11 真机 bug:只刷显隐和文案,「使用存储」后下拉停留旧值)。**新增任何从 state 读取的 UI 控件,必须同步到对应 refresh 函数**;相关控件声明在 isAe 块作用域(build 时赋值),别留成 buildXxx 局部变量
 13. **数值框 = 每槽位 3 个 edittext 池**:`vin[slot]` 是数组,按 dim 切换 visible;框 onChange 直写 `state.val[slot][k]`(v0.1.7),**不要在该框 onChange 里调 refresh()**(会把正在编辑的框文本重置);切换 vtype 不丢数据(数组格子原样保留)
 14. **Tab 键数字框循环(v0.2.7)**:所有数字输入框(间隔/节点数值/曲线段数值)创建时调 `bindNumTab(box)` 注册进 `numBoxes` 并按创建顺序 Tab 循环(用 onKeyDown 拦 `e.keyName==="Tab"` + `e.preventDefault()` + 下一个可见可用的框 `.active=true`);**新增数字输入框必须调 bindNumTab**,否则 Tab 会跳走;ScriptUI edittext 的 onKeyDown/preventDefault/active 均可用(Adobe 官方示例 + ExtendScript wiki 确认)
 14. **曲线功能(v0.2.0/0.2.2)**:「曲线功能」**开关行常驻可见**(checkbox + 导出/导入按钮不藏进隐藏组——否则开关默认关时入口消失,用户永远勾不到,v0.2.2 修复);**段 = 开启节点的相邻对**(`curveSegments(on, count)`,关闭节点断开链条、段随开关重排——关闭剔除语义的自然延伸,不是固定槽位对);段状态 `state.curve.seg[i]` 按段序号存(ensureCurveSeg 补齐默认线性),段数变化值保留;段行懒增长 `ensureSegRows`

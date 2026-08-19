@@ -2,6 +2,44 @@
 
 > 一坑一篇,按时间倒序。只记录"代码里看不出的信息"。
 
+## v0.3.11(2026-08-19)—「使用存储」后数值类型下拉不刷新:refresh 没把 state 同步回控件
+
+### 起因
+
+真机:「使用存储 1-4」恢复槽位后,「数值输入」下拉(1 空/2 空/3 空/表达式)
+停留旧值,界面与实际 state 不一致。
+
+### 根因
+
+预设管理走「改 state → refresh()」单向流(v0.3.5 定案),refresh = refreshHeader
++ refreshNodes + refreshCurve。但 v0.3.0 拆分后 `refreshHeader` **只刷新了
+表达式行显隐和按钮文案**(grpExpr.visible / btnKey.text),从未把 state 同步回
+头部控件;`refreshCurve` 也只刷段行,不刷曲线总开关/端点平滑。而「使用存储」
+恢复的恰是 mode/count/vtype/expr/curveEnabled/curveSmoothEnd 这些字段——
+state 变了,控件不动。
+
+控件还是 buildHeader/buildCurveArea 的**局部变量**(var ddType 等),外层
+refresh 函数根本访问不到——所以不是"漏写一行",是作用域设计导致的必然缺失。
+
+### 修复
+
+1. 相关控件提升到 isAe 块作用域(cntInp/ddMode/ddType/exprInp/chkCurve/chkSmooth),
+   build 时赋值(去掉 var)
+2. refreshHeader 同步:ddMode.selection / cntInp.text / ddType.selection /
+   exprInp.text(程序设置 selection/text 不触发 onChange/onClick,无副作用)
+3. refreshCurve 同步:chkCurve.value / chkSmooth.value
+
+### 验证
+
+- 158 断言不变(纯 UI 层);语法 ✓ BOM ✓ 已部署
+- 待真机:「使用存储」看 4 个头部控件 + 2 个曲线开关是否全部跟随;「复位」
+  「导入配置」同路径,一并验证
+
+### 教训(已写入 AGENTS 坑 12b)
+
+「改 state → refresh()」单向流里,refresh 函数必须同步**所有从 state 读取**的
+控件,新增控件即加同步;控件声明统一放 isAe 块作用域,别留局部。
+
 ## v0.3.9(2026-08-19)— 导出文件可读性优化:单行 + 分组 + 备注(仍是标准 JSON)
 
 ### 起因

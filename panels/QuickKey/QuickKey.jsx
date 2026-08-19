@@ -1510,6 +1510,14 @@
         var grpSegs = null;    // 曲线段容器(随曲线开关显隐)
         var btnKey = null;     // 打帧/应用表达式按钮(文案随 vtype)
         var status = null;     // 状态栏
+        // v0.3.11:头部/曲线开关控件提升到块作用域,refresh 时把 state 同步回控件
+        // (「使用存储/复位/导入配置」走 state → refresh 单向流,控件必须跟随)
+        var cntInp = null;     // 节点数输入框
+        var ddMode = null;     // 模式下拉(起始/中间/末尾)
+        var ddType = null;     // 数值类型下拉(1空/2空/3空/表达式)
+        var exprInp = null;    // 表达式输入框
+        var chkCurve = null;   // 曲线功能总开关
+        var chkSmooth = null;  // 端点平滑开关
 
         // 顶部行:节点数 / 模式 / 数值类型 / 表达式(v0.3.0 分组构建)
         function buildHeader() {
@@ -1518,7 +1526,7 @@
             grpCount.alignChildren = ["fill", "center"];
             grpCount.spacing = 6;
             grpCount.add("statictext", undefined, "节点数(1~30):");
-            var cntInp = grpCount.add("edittext", undefined, String(state.count));
+            cntInp = grpCount.add("edittext", undefined, String(state.count));   // v0.3.11:块级变量
             cntInp.characters = 3;
             cntInp.onChange = function () {
                 var v = parseInt(cntInp.text, 10);
@@ -1539,7 +1547,7 @@
             grpMode.alignChildren = ["fill", "center"];
             grpMode.spacing = 6;
             grpMode.add("statictext", undefined, "当前时间指示器作为:锚点");
-            var ddMode = grpMode.add("dropdownlist", undefined, MODE_NAMES);
+            ddMode = grpMode.add("dropdownlist", undefined, MODE_NAMES);   // v0.3.11:块级变量
             ddMode.selection = ddMode.items[0];   // 默认起始帧
             ddMode.onChange = function () {
                 state.mode = ddMode.selection.index;
@@ -1552,7 +1560,7 @@
             grpType.alignChildren = ["fill", "center"];
             grpType.spacing = 6;
             grpType.add("statictext", undefined, "数值输入:");
-            var ddType = grpType.add("dropdownlist", undefined, VTYPE_NAMES);
+            ddType = grpType.add("dropdownlist", undefined, VTYPE_NAMES);   // v0.3.11:块级变量
             ddType.selection = ddType.items[0];   // 默认 1 个空
             var typeHint = grpType.add("statictext", undefined, "空=数组维度");
             typeHint.preferredSize.width = 84;
@@ -1567,7 +1575,7 @@
             grpExpr.alignChildren = ["fill", "center"];
             grpExpr.spacing = 6;
             grpExpr.add("statictext", undefined, "表达式:");
-            var exprInp = grpExpr.add("edittext", undefined, state.expr);
+            exprInp = grpExpr.add("edittext", undefined, state.expr);   // v0.3.11:块级变量
             exprInp.characters = 26;
             exprInp.onChange = function () { state.expr = exprInp.text; };
         }
@@ -1649,8 +1657,8 @@
             grpCurve.orientation = "row";
             grpCurve.alignChildren = ["fill", "center"];
             grpCurve.spacing = 6;
-            var chkCurve = grpCurve.add("checkbox", undefined, "曲线功能");
-            var chkSmooth = grpCurve.add("checkbox", undefined, "端点平滑");
+            chkCurve = grpCurve.add("checkbox", undefined, "曲线功能");   // v0.3.11:块级变量
+            chkSmooth = grpCurve.add("checkbox", undefined, "端点平滑");
             var btnExport = grpCurve.add("button", undefined, "导出预设");
             var btnImport = grpCurve.add("button", undefined, "导入预设");
             chkCurve.onClick = function () {
@@ -2024,8 +2032,14 @@
 
         // ---------- 刷新(拆分,每块管一件事;refresh 为唯一渲染入口)----------
 
-        // 顶部:表达式行显隐 + 按钮文案(v0.3.0 拆分)
+        // 顶部:模式/节点数/数值类型/表达式 控件跟随 state + 表达式行显隐 + 按钮文案
+        // (v0.3.11 修复:「使用存储/复位/导入配置」走 state→refresh 单向流,
+        //  这些控件之前不跟随,下拉/输入框停留在旧值)
         function refreshHeader() {
+            ddMode.selection = ddMode.items[state.mode];
+            cntInp.text = String(state.count);
+            ddType.selection = ddType.items[state.vtype];
+            exprInp.text = state.expr;
             grpExpr.visible = (state.vtype === 3);
             btnKey.text = (state.vtype === 3) ? "应用表达式(选中属性)" : "打帧(全部开启的节点)";
         }
@@ -2060,7 +2074,10 @@
         }
 
         // 曲线段行:开关开启且非表达式模式时显示,懒增长 + 填值(v0.3.0 拆分)
+        // v0.3.11:曲线总开关/端点平滑 checkbox 跟随 state(使用存储后不再停留旧值)
         function refreshCurve() {
+            chkCurve.value = state.curve.enabled;
+            chkSmooth.value = state.curve.smoothEnd;
             var curveShow = state.curve.enabled && state.vtype !== 3;
             grpSegs.visible = curveShow;
             if (curveShow) {
