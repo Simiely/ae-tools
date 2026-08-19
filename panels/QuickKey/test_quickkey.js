@@ -434,5 +434,71 @@ var r12 = QK.applySegCurves(mp12, [
 eq("3D 缩放(非空间)缓动数组=3 applied=3", r12.applied, 3);
 eq("3D 缩放 ease 全 eiLen=3", (mp12.log.ease.length === 3 && mp12.log.ease[0].eiLen === 3 && mp12.log.ease[2].eiLen === 3), true);
 
-console.log(failures === 0 ? "ALL PASS (" + 116 + " assertions)" : failures + " FAILURES");
+// ---- 全参数预设 v0.3.5(collect/apply round-trip + 配置序列化解析) ----
+function freshState() {
+    return {
+        mode: 0, count: 3, vtype: 0, expr: "",
+        on: {1: true, 2: true, 3: true, 4: false, 5: false},
+        gap: {1: 5, 2: 5, 3: 5, 4: 5, 5: 5},
+        val: {1: ["", "", ""], 2: ["", "", ""], 3: ["", "", ""], 4: ["", "", ""], 5: ["", "", ""]},
+        curve: {enabled: false, smoothEnd: false, seg: {}}
+    };
+}
+// 编码:开关/间隔/数值/曲线段
+var stA = freshState();
+stA.count = 3;
+stA.gap[2] = 10;
+stA.val[1] = ["50", "", "8"];
+stA.val[2] = ["", "20", ""];
+stA.curve.enabled = true;
+stA.curve.smoothEnd = true;
+stA.curve.seg[1] = {preset: "缓入缓出", x1: 0.42, y1: 0, x2: 0.58, y2: 1};
+stA.curve.seg[2] = {preset: "自定义", x1: 0.1, y1: 0.2, x2: 0.8, y2: 1.5};
+var cA = QK.collectParams(stA);
+eq("collect on=111", cA.on, "111");
+eq("collect gap", cA.gap, "5,10,5");
+eq("collect val 3 槽位", cA.val, "50,,8|,20,|,,");
+eq("collect curveSeg 2 段", cA.curveSeg, "缓入缓出,0.42,0,0.58,1|自定义,0.1,0.2,0.8,1.5");
+eq("collect curveEnabled/smoothEnd", (cA.curveEnabled === 1 && cA.curveSmoothEnd === 1), true);
+// 关闭节点2 → 开关串 101,曲线段按关闭剔除只剩 1 段(节点1→3 直连)
+var stD = freshState();
+stD.count = 3;
+stD.on[2] = false;
+var cD = QK.collectParams(stD);
+eq("collect 关节点2 on=101", cD.on, "101");
+eq("collect 关节点2 曲线 1 段", cD.curveSeg, "线性,0,0,1,1");
+// apply round-trip:收集的配置写回新 state,再收集应一致
+var stB = freshState();
+eq("applyParamsToState 返回 true", QK.applyParamsToState(stB, cA), true);
+var cB = QK.collectParams(stB);
+eq("round-trip 参数一致", JSON.stringify(cB) === JSON.stringify(cA), true);
+eq("round-trip 数值格子", JSON.stringify(stB.val[1]) === JSON.stringify(["50", "", "8"]), true);
+// 缺失字段兜底(空配置 → 默认)
+var stC = freshState();
+eq("apply 空对象 → 默认", QK.applyParamsToState(stC, {}), true);
+eq("apply 空对象 count 默认 3", stC.count, 3);
+eq("apply 空对象 on 全开", stC.on[4], true);
+// decode 系列
+eq("decodeOn 缺省全开", QK.decodeOn(undefined, 3), {1: true, 2: true, 3: true});
+eq("decodeNums 补默认", QK.decodeNums("5,7", 3, 5), {1: 5, 2: 7, 3: 5});
+eq("decodeVal 不足补空", QK.decodeVal("50|", 3), {
+    1: ["50", "", ""], 2: ["", "", ""], 3: ["", "", ""]
+});
+eq("decodeSeg 非法行过滤", QK.decodeSeg("线性,0,0,1,1|x"), [{preset: "线性", x1: 0, y1: 0, x2: 1, y2: 1}]);
+// 配置序列化/解析 round-trip(node 有全局 JSON,走 JSON.parse 路径)
+var slotsArr = [cA, {}, cA, {}];
+var cfgJson = QK.stringifyConfig(cA, [{name: "弹", x1: 0.2, y1: 1.4, x2: 0.7, y2: 0.6}], slotsArr);
+eq("stringifyConfig 是标准 JSON", (JSON.parse(cfgJson).version === 1), true);
+var cfgParsed = QK.parseConfigText(cfgJson);
+eq("parseConfigText params 一致", JSON.stringify(cfgParsed.params) === JSON.stringify(cA), true);
+eq("parseConfigText slots 槽位2 为空", JSON.stringify(cfgParsed.slots[1]), "{}");
+eq("parseConfigText presets 恢复", cfgParsed.presets.length === 1 && cfgParsed.presets[0].name === "弹", true);
+// 手写解析路径(绕过全局 JSON):直接测 extract 函数
+var pBlock = QK.extractParamsFromBlock('"mode":1,"count":4,"on":"1010","gap":"3,7"');
+eq("extractParamsFromBlock 提取字段", (pBlock.mode === 1 && pBlock.count === 4 && pBlock.on === "1010"), true);
+eq("extractParamsFromBlock 空块 → null", QK.extractParamsFromBlock(""), null);
+var slotsTxt = '{"slots":[{"mode":0},{"mode":1},{},{}]}';
+eq("extractSlotsFallback 顺序+空槽", JSON.stringify(QK.extractSlotsFallback(slotsTxt)), JSON.stringify([{mode: 0}, {mode: 1}, {}, {}]));
+
+console.log(failures === 0 ? "ALL PASS (" + 135 + " assertions)" : failures + " FAILURES");
 process.exit(failures === 0 ? 0 : 1);

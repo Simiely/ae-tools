@@ -2,6 +2,35 @@
 
 > 一坑一篇,按时间倒序。只记录"代码里看不出的信息"。
 
+## v0.3.5(2026-08-19)— 全参数预设管理:4 槽位 + 双层持久化 + 导出导入
+
+### 方案来源
+
+对齐 AE-Lyrics-Animator → Rolling-Lyrics → Water-Rise 三代插件:
+4 槽位(存储/使用/复位/清除)+ 双层持久化(工程目录 JSON 跟工程走、读优先
++ app.settings 全局保底)。QuickKey 参数集中在 state(单向流),所以收集/回填
+直接操作 state,比从 UI 控件读更可靠。
+
+### 关键设计决策(代码里看不出的)
+
+1. **参数扁平化编码**(on 开关串 / gap 逗号 / val 槽位 `|` 格 `,` / curveSeg
+   段 `|` 字段 `,`):让"手写 JSON 兜底解析"可行——ExtendScript 无原生 JSON,
+   全量配置嵌套深,手写通用递归解析器不可维护;扁平结构 + grabStr/grabNum
+   逐字段提取(extractParamsFromBlock)足够简单可靠
+2. **槽位空 = `{}` 而非 null**:手写块解析按 `{..}` 顺序映射槽位 1-4,
+   null 会破坏位置计数;空对象字段全缺 = 空槽位
+3. **启动只恢复槽位、不覆盖当前参数**:loadSlotsFromStorage 仅填充
+   state.slots(工程 JSON 优先,app.settings 保底),当前面板参数保持默认
+4. **载入走「改 state → refresh → layout」单向流**:loadSlot/resetParams/
+   importConfig 都不直接碰控件,避免状态与 UI 脱节(曲线预设导入同规则)
+5. **导出配置 = 全量备份**(当前参数 + 4 槽位 + 曲线库),与曲线区
+   「导出/导入预设」(只管曲线库)分工;`splitBy` 自写(零正则、不依赖 split)
+
+### 验证
+
+collectParams/applyParamsToState round-trip、关闭剔除段数、配置序列化解析、
+手写解析路径全覆盖(116 → 135 断言);待真机验证双层持久化与导出导入。
+
 ## v0.3.0(2026-08-19)— UI 层重构:行池工厂 + 构建分块 + 刷新拆分(阶段 1:主线)
 
 ### 起因

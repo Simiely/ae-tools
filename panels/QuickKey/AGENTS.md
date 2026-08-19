@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**:2026-08-19(v0.3.0)
+> 📌 **文档基线**:2026-08-19(v0.3.6)
 > **更新文档/代码后,请更新此行**(日期 + 新 commit hash),并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
@@ -69,23 +69,23 @@
 18. **ExtendScript 三个隐藏雷(真机踩坑)**:
     - **禁止在正则字面量里写 `\\`(双反斜杠)**——ExtendScript 解析器报「语法错误」(node/V8 能过,node --check 拦不住;真机报「行 794 无法执行脚本」,v0.2.1)。需要匹配反斜杠时改用字符串方法(indexOf/lastIndexOf/substring)或 `new RegExp("...")` 字符串构造
     - **对象字面量属性名禁止用 ES3 保留字**(如 `in`/`new`/`var`/`default` 等)——报「非法使用保留字」(node 现代引擎允许保留字做属性名,node --check 拦不住;真机报「行 237 无法执行脚本」,v0.2.13 bezierToEase 的 `{out, in}` 踩坑)。属性名改用非保留字(如 `inE`);**新增对象字面量后 grep 一遍 `(?:[{,]\s*)(in|new|var|...)\s*:`**
-    - **JSON 不是 ExtendScript 原生内置**(ECMA-262 v3,ES5 才有 JSON.parse/stringify;能用是因为 Adobe Libraries 等面板把 JSON 泄漏进共享全局)。**禁止直接依赖全局 JSON**——一律用本项目自带的迷你 JSON:`stringifyPresets`(序列化)/ `parsePresetsText`(解析,内部先试全局 JSON 再退回 `extractPresetsFallback` 手写提取),全程零正则字面量
+    - **JSON 不是 ExtendScript 原生内置**(ECMA-262 v3,ES5 才有 JSON.parse/stringify;能用是因为 Adobe Libraries 等面板把 JSON 泄漏进共享全局)。**禁止直接依赖全局 JSON**——一律用本项目自带的迷你 JSON:曲线预设用 `stringifyPresets`/`parsePresetsText`(退回 `extractPresetsFallback`);全参数配置(v0.3.5)用 `stringifyConfig`/`parseConfigText`(退回 `extractParamsFromBlock` + `extractSlotsFallback`),全程零正则字面量
 
 ## 约定
 
 - UI 标签用中文;注释用中文;单 .jsx 文件交付
-- 节点数默认 5(1~30),模式默认「起始帧」,数值输入默认「1 个空」,间隔默认 5 帧,节点 1~3 开、4~5 关;数值列默认全空(= 用当前值)
+- 节点数默认 3(1~30,v0.3.4),模式默认「起始帧」,数值输入默认「1 个空」,间隔默认 5 帧;数值列默认全空(= 用当前值)
 - 数值输入规则:`classifyValue` 每空一格;1 空 = 单值(自动广播多维),2 空 = 二维(位置/缩放/锚点),3 空 = 三维(3D 图层);表达式模式写 AE 表达式,不排帧
-- UI 行顺序:节点数 → 模式 → 数值输入 → 表达式 → 节点表 → 曲线区(开关+导出导入+段行)→ 打帧/调试 → 状态栏
+- UI 行顺序:节点数 → 模式 → 数值输入 → 表达式 → 节点表 → 曲线区(开关+导出导入+段行)→ **预设管理(存储/使用/复位/清除/导出配置/导入配置,v0.3.5)** → 打帧/调试 → 状态栏
 - 操作结果提示写面板底部 statusBar,不用 alert 弹窗(仅"未激活合成"用弹窗)
 - 槽位顺序:上早下晚(槽位 1 最早上);锚点槽位 = `anchorPos(state.mode, state.count)`
-- 曲线默认:功能关;预设 = 内置 4 个(线性/缓入/缓出/缓入缓出);段默认线性
-- 状态只存在内存,不持久化(关闭面板重置;预设可通过导出/导入持久化)
+- 曲线默认:功能关;预设 = 内置 9 个(线性/缓入/缓出/缓入缓出 + cubic-3/2/1/out/in);段默认线性
+- **预设管理(v0.3.5)**:4 槽位,存储/使用/清除/复位;双层持久化(工程 `quickkey_配置.json` 读优先 + app.settings Section=QuickKey 保底);导出配置 = 全量备份(当前参数+槽位+曲线库)。**载入/复位一律走「改 state → refresh() → layout」单向流,禁止直接改控件**;collectParams/applyParamsToState 是纯函数,改动必须跑测试
 - 发布:push 到 GitHub(仓库 public,用 PAT + 代理 7890)
 
 ## 常用命令
 
-- 回归测试:`node test_quickkey.js`(74 项断言,改纯逻辑层函数必须跑)
+- 回归测试:`node test_quickkey.js`(135 项断言,改纯逻辑层函数必须跑)
 - 语法检查:`cp QuickKey.jsx _check.js && node --check _check.js && rm _check.js`
 - 补 BOM:Python 前插 `b'\xef\xbb\xbf'`
 - 部署:`python install.py`(ae-tools 根目录,自动检测 AE 版本 + BOM + 字节校验)

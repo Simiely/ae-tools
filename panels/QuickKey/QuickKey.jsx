@@ -1,18 +1,21 @@
 ﻿// ============================================================
 // QuickKey · 节点式 K 帧排程面板  QuickKey.jsx
-// 版本: 0.3.0  (2026-08-19)
+// 版本: 0.3.6  (2026-08-19)
 // 适用: After Effects CC 2015.3+ (依赖 selectedProperties API)
 //
 // 以当前时间指示器为锚点,按节点排程给选中属性批量打关键帧;
 // 曲线功能为每段套 cubic-bezier 缓动;预设可导出/导入 JSON。
 //
 // 代码地图(用函数名定位,行号会随编辑漂移):
-//   纯逻辑层(node 可测,test_quickkey.js 116 断言):
+//   纯逻辑层(node 可测,test_quickkey.js 135 断言):
 //     排程: anchorPos / computeTimes / classifyValue / buildPlan / planHasExplicit
 //     曲线: matchPreset / curveSegments / mergePresets / validatePresets /
 //            isLinearPreset / bezierToEase / valDiff
 //     迷你 JSON(ES3 自包含,勿依赖全局 JSON): stringifyPresets /
 //            parsePresetsText / extractPresetsFallback
+//     全参数预设(v0.3.5): collectParams / applyParamsToState / decodeOn·
+//            decodeNums·decodeVal·decodeSeg / jsonStringify / stringifyConfig /
+//            parseConfigText / extractParamsFromBlock / extractSlotsFallback
 //   预检层(AE 依赖): propDimCore / propDimOf / easeDimOf / propTypeName /
 //            propLayerInfo / dimCheck / failDimCheck
 //   公共辅助: withUndo / perProp / setStatus / propName / errMsg
@@ -23,9 +26,14 @@
 //           bindNumTab·focusNextNum(Tab 数字框循环)
 //     构建: buildHeader(节点数/模式/数值类型/表达式)/
 //           buildNodeArea(节点行池)/ buildCurveArea(曲线开关+段行池)/
+//           buildPresetArea(预设管理:存储/使用/复位/清除/导出配置/导入配置)/
 //           buildFooter(打帧/调试按钮+状态栏)
 //     刷新: refresh = refreshHeader + refreshNodes + refreshCurve
 //     曲线: syncSegDropdown / rebuildPresetDropdowns
+//     预设持久化(v0.3.5): saveSlot / loadSlot / clearAllPresets / resetParams /
+//           exportConfig / importConfig / loadSlotsFromStorage /
+//           getProjectPresetFile · read·write·deleteProjectFile /
+//           read·write·deleteSlotFromSettings / updatePresetButtons
 //
 // 关键设计(改代码前必读,详见 AGENTS.md / DEVELOPMENT.md):
 //   - 间隔 = 与「靠锚点侧最近开启节点」的帧距;关闭节点完全剔除
@@ -39,6 +47,9 @@
 //     (线性=匀速,严禁速度 0);平滑模式首/末帧速度归零;帧两侧段都线性才跳过
 //   - ExtendScript 雷区:禁写含双反斜杠的正则字面量(语法错误);
 //     对象属性名禁用 ES3 保留字(如 in);JSON 非原生内置,必须用自带迷你 JSON
+//   - 全参数预设(v0.3.5):4 槽位 + 双层持久化(工程 quickkey_配置.json 读优先
+//     + app.settings 保底);载入/复位走「改 state → refresh → layout」单向流;
+//     参数扁平化编码让手写 JSON 兜底解析可行;槽位空 = {} 而非 null
 //   - 打帧目标 = selectedProperties;整次操作一个 Undo 组(Ctrl+Z 整体撤销)
 //   - Tab 键只在数字输入框之间循环(v0.2.7)
 //   - KeyframeEase influence 合法范围 [0.1..100](v0.2.8)
@@ -57,12 +68,17 @@
     var VTYPE_NAMES = ["1 个空", "2 个空", "3 个空", "表达式"];
     var MAX_COUNT = 30;   // 节点数上限(防面板撑爆)
 
-    // 内置曲线预设(cubic-bezier):线性 / 缓入 / 缓出 / 缓入缓出
+    // 内置曲线预设(cubic-bezier):线性 / 缓入 / 缓出 / 缓入缓出 + cubic 系列(v0.3.6)
     var PRESETS_DEFAULT = [
         {name: "线性",     x1: 0,    y1: 0,    x2: 1,    y2: 1},
         {name: "缓入",     x1: 0.42, y1: 0,    x2: 1,    y2: 1},
         {name: "缓出",     x1: 0,    y1: 0,    x2: 0.58, y2: 1},
-        {name: "缓入缓出", x1: 0.42, y1: 0,    x2: 0.58, y2: 1}
+        {name: "缓入缓出", x1: 0.42, y1: 0,    x2: 0.58, y2: 1},
+        {name: "cubic-3",  x1: 0.8,  y1: 0,    x2: 0.66, y2: 1},
+        {name: "cubic-2",  x1: 0.34, y1: 0,    x2: 0.2,  y2: 1},
+        {name: "cubic-1",  x1: 0.66, y1: 0,    x2: 0.34, y2: 1},
+        {name: "cubic-out", x1: 0.32, y1: 0.94, x2: 0.6, y2: 1},
+        {name: "cubic-in", x1: 0.4,  y1: 0,    x2: 0.68, y2: 0.06}
     ];
 
     // 锚点槽位:起始 = 1,中间 = ⌈N/2⌉,末尾 = N(v0.1.4 起随 N 动态)
@@ -80,7 +96,7 @@
 
     var state = {
         mode: 0,                       // 0=起始 1=中间 2=末尾
-        count: 5,                      // 节点数(1~30,默认 5)
+        count: 3,                      // 节点数(1~30,默认 3)
         vtype: 0,                      // 数值类型 0=1空 1=2空 2=3空 3=表达式
         expr: "",                      // 表达式内容(表达式模式)
         on:  {1: true, 2: true, 3: true, 4: false, 5: false},  // 槽位开关(锚点恒开)
@@ -94,7 +110,8 @@
             smoothEnd: false,            // 端点平滑(v0.2.15):首帧/末帧速度归零,两端圆润
             presets: curvePresetsInit,   // 预设列表(内置 + 导入,同名覆盖)
             seg: {}                      // 段 1..n: {preset, x1, y1, x2, y2}
-        }
+        },
+        slots: {}                        // 预设槽位 1..4 → 扁平参数(v0.3.5,内存缓存)
     };
     var lastReport = "";               // 上次执行报告(调试按钮弹出)
 
@@ -442,6 +459,252 @@
             }
         } catch (e) {}
         return extractPresetsFallback(txt);
+    }
+
+    // ===== 全参数预设(v0.3.5,纯逻辑层,node 可测)=====
+    // 对齐 AE-Lyrics-Animator / AE-Rolling-Lyrics / AE-Water-Rise-Generator 的
+    // 4 槽位 + 双层持久化方案;QuickKey 参数集中在 state,收集/回填直接操作
+    // state(单向流),比从 UI 控件读更可靠。
+    //
+    // 参数扁平化编码(槽位与配置文件共用):
+    //   on       = "110"       槽位 1..count 开关串(1=开 0=关)
+    //   gap      = "5,5,5"     槽位间隔,逗号分隔
+    //   val      = "50,,|,,"   每槽位 3 格逗号分隔,槽位间 | 分隔(空串=留空)
+    //   curveSeg = "线性,0,0,1,1|缓入,0.42,0,1,1"  段间 |、字段逗号(名,x1,y1,x2,y2)
+    // 配置文件 = {version, ...参数, presets 曲线库, slots[4](空槽位 = {})}
+
+    function splitBy(s, sep) {
+        var out = [];
+        var cur = "";
+        for (var i = 0; i < s.length; i++) {
+            if (s[i] === sep) { out.push(cur); cur = ""; }
+            else { cur += s[i]; }
+        }
+        out.push(cur);
+        return out;
+    }
+
+    // 收集当前 state 的全部参数 → 扁平对象(深拷贝语义)
+    function collectParams(state) {
+        var on = "";
+        var gaps = [];
+        var vals = [];
+        for (var i = 1; i <= state.count; i++) {
+            on += (state.on[i] !== false) ? "1" : "0";
+            gaps.push(String(state.gap[i] !== undefined ? state.gap[i] : 5));
+            var v = state.val[i];
+            var cells = [];
+            for (var k = 0; k < 3; k++) {
+                cells.push((v && v[k] !== undefined) ? String(v[k]) : "");
+            }
+            vals.push(cells.join(","));
+        }
+        var segParts = [];
+        var segList = curveSegments(state.on, state.count);
+        for (var j = 0; j < segList.length; j++) {
+            var seg = state.curve.seg[j + 1];
+            if (seg) {
+                segParts.push((seg.preset || "自定义") + "," + seg.x1 + "," + seg.y1
+                    + "," + seg.x2 + "," + seg.y2);
+            } else {
+                segParts.push("线性,0,0,1,1");
+            }
+        }
+        return {
+            mode: state.mode,
+            count: state.count,
+            vtype: state.vtype,
+            expr: state.expr,
+            on: on,
+            gap: gaps.join(","),
+            val: vals.join("|"),
+            curveEnabled: state.curve.enabled ? 1 : 0,
+            curveSmoothEnd: state.curve.smoothEnd ? 1 : 0,
+            curveSeg: segParts.join("|")
+        };
+    }
+
+    function decodeOn(str, n) {
+        var on = {};
+        var has = (typeof str === "string");
+        for (var i = 1; i <= n; i++) {
+            on[i] = has ? (str[i - 1] === "1") : true;
+        }
+        return on;
+    }
+
+    function decodeNums(str, n, def) {
+        var arr = (typeof str === "string" && str !== "") ? splitBy(str, ",") : [];
+        var out = {};
+        for (var i = 1; i <= n; i++) {
+            var raw = (i <= arr.length) ? parseFloat(arr[i - 1]) : NaN;
+            out[i] = isNaN(raw) ? def : raw;
+        }
+        return out;
+    }
+
+    function decodeVal(str, n) {
+        var parts = (typeof str === "string" && str !== "") ? splitBy(str, "|") : [];
+        var out = {};
+        for (var i = 1; i <= n; i++) {
+            var cells = (i <= parts.length) ? splitBy(parts[i - 1], ",") : [];
+            var arr = [];
+            for (var k = 0; k < 3; k++) { arr.push(k < cells.length ? cells[k] : ""); }
+            out[i] = arr;
+        }
+        return out;
+    }
+
+    function decodeSeg(str) {
+        var parts = (typeof str === "string" && str !== "") ? splitBy(str, "|") : [];
+        var out = [];
+        for (var i = 0; i < parts.length; i++) {
+            var f = splitBy(parts[i], ",");
+            if (f.length >= 5) {
+                var x1 = parseFloat(f[1]), y1 = parseFloat(f[2]);
+                var x2 = parseFloat(f[3]), y2 = parseFloat(f[4]);
+                out.push({preset: f[0],
+                    x1: isNaN(x1) ? 0 : x1, y1: isNaN(y1) ? 0 : y1,
+                    x2: isNaN(x2) ? 1 : x2, y2: isNaN(y2) ? 1 : y2});
+            }
+        }
+        return out;
+    }
+
+    function clampInt(v, def, lo, hi) {
+        var n = parseInt(v, 10);
+        if (isNaN(n)) { return def; }
+        return Math.max(lo, Math.min(hi, n));
+    }
+
+    // 扁平参数 → 写回 state(缺失字段回退默认,兼容旧配置/空槽位)
+    function applyParamsToState(state, p) {
+        if (!p || typeof p !== "object") { return false; }
+        state.mode = clampInt(p.mode, 0, 0, 2);
+        state.count = clampInt(p.count, 3, 1, 30);
+        state.vtype = clampInt(p.vtype, 0, 0, 3);
+        state.expr = (typeof p.expr === "string") ? p.expr : "";
+        var onMap = decodeOn(p.on, 30);
+        var gaps = decodeNums(p.gap, 30, 5);
+        var vals = decodeVal(p.val, 30);
+        for (var i = 1; i <= 30; i++) {
+            state.on[i] = onMap[i];
+            state.gap[i] = gaps[i];
+            state.val[i] = vals[i];
+        }
+        state.curve.enabled = (clampInt(p.curveEnabled, 0, 0, 1) === 1);
+        state.curve.smoothEnd = (clampInt(p.curveSmoothEnd, 0, 0, 1) === 1);
+        var segs = decodeSeg(p.curveSeg);
+        state.curve.seg = {};
+        for (var j = 0; j < segs.length; j++) { state.curve.seg[j + 1] = segs[j]; }
+        return true;
+    }
+
+    // 通用 JSON 序列化(紧凑,零正则字面量;node 可验证标准性)
+    function jsonStringify(obj) {
+        var t = typeof obj;
+        if (obj === null) { return "null"; }
+        if (t === "number") { return jsonNum(obj); }
+        if (t === "boolean") { return obj ? "true" : "false"; }
+        if (t === "string") { return jsonStr(obj); }
+        if (obj instanceof Array) {
+            var a = [];
+            for (var i = 0; i < obj.length; i++) { a.push(jsonStringify(obj[i])); }
+            return "[" + a.join(",") + "]";
+        }
+        if (t === "object") {
+            var out = [];
+            for (var k in obj) {
+                if (obj.hasOwnProperty(k) && obj[k] !== undefined) {
+                    out.push(jsonStr(k) + ":" + jsonStringify(obj[k]));
+                }
+            }
+            return "{" + out.join(",") + "}";
+        }
+        return "null";
+    }
+
+    // 配置对象 → JSON 文本(当前参数 + 曲线库 + 4 槽位,空槽位 = {})
+    function stringifyConfig(params, presets, slots) {
+        var cfg = {version: 1};
+        for (var k in params) { cfg[k] = params[k]; }
+        cfg.presets = presets || [];
+        cfg.slots = slots || [{}, {}, {}, {}];
+        return jsonStringify(cfg);
+    }
+
+    // 从文本块提取扁平参数(手写兜底用;无任何字段返回 null = 空槽位)
+    function extractParamsFromBlock(block) {
+        var p = {};
+        var m = grabNum(block, "mode"); if (m !== null) { p.mode = m; }
+        m = grabNum(block, "count"); if (m !== null) { p.count = m; }
+        m = grabNum(block, "vtype"); if (m !== null) { p.vtype = m; }
+        m = grabNum(block, "curveEnabled"); if (m !== null) { p.curveEnabled = m; }
+        m = grabNum(block, "curveSmoothEnd"); if (m !== null) { p.curveSmoothEnd = m; }
+        var s = grabStr(block, "expr"); if (s !== null) { p.expr = s; }
+        s = grabStr(block, "on"); if (s !== null) { p.on = s; }
+        s = grabStr(block, "gap"); if (s !== null) { p.gap = s; }
+        s = grabStr(block, "val"); if (s !== null) { p.val = s; }
+        s = grabStr(block, "curveSeg"); if (s !== null) { p.curveSeg = s; }
+        var any = false;
+        for (var k in p) { any = true; break; }
+        return any ? p : null;
+    }
+
+    // 手写提取 slots 数组(按 {..} 块顺序 = 槽位 1-4,空槽位 {} 返回 {})
+    function extractSlotsFallback(txt) {
+        var slots = [{}, {}, {}, {}];
+        var q = '"slots"';
+        var p = txt.indexOf(q);
+        if (p < 0) { return slots; }
+        p = txt.indexOf("[", p + q.length);
+        if (p < 0) { return slots; }
+        var e = txt.lastIndexOf("]");
+        if (e < 0 || e < p) { return slots; }
+        var body = txt.substring(p + 1, e);
+        var idx = 0;
+        var i = 0;
+        while (i < body.length && idx < 4) {
+            var ns = body.indexOf("{", i);
+            if (ns < 0) { break; }
+            var ne = body.indexOf("}", ns);
+            if (ne < 0) { break; }
+            var prm = extractParamsFromBlock(body.substring(ns + 1, ne));
+            if (prm) { slots[idx] = prm; }
+            idx++;
+            i = ne + 1;
+        }
+        return slots;
+    }
+
+    // 配置文本 → {params, presets, slots}(全局 JSON 优先,失败退回手写提取)
+    function parseConfigText(txt) {
+        if (!txt || typeof txt !== "string") { return null; }
+        var slots = [{}, {}, {}, {}];
+        try {
+            if (typeof JSON !== "undefined" && JSON.parse) {
+                var d = JSON.parse(txt);
+                if (d && typeof d === "object") {
+                    var params = {
+                        mode: d.mode, count: d.count, vtype: d.vtype, expr: d.expr,
+                        on: d.on, gap: d.gap, val: d.val,
+                        curveEnabled: d.curveEnabled, curveSmoothEnd: d.curveSmoothEnd,
+                        curveSeg: d.curveSeg
+                    };
+                    var vp = validatePresets(d);
+                    var presets = vp ? vp : [];
+                    if (d.slots instanceof Array) {
+                        for (var si = 0; si < 4 && si < d.slots.length; si++) {
+                            if (d.slots[si] && typeof d.slots[si] === "object") { slots[si] = d.slots[si]; }
+                        }
+                    }
+                    return {params: params, presets: presets, slots: slots};
+                }
+            }
+        } catch (e) {}
+        var params2 = extractParamsFromBlock(txt);
+        if (!params2) { return null; }
+        return {params: params2, presets: extractPresetsFallback(txt) || [], slots: extractSlotsFallback(txt)};
     }
 
     // ===== 预检层(AE 依赖)=====
@@ -837,7 +1100,8 @@
 
     // 打帧报告:纯文本拼接(报告与执行彻底分离,v0.1.14)
     // curveNames = 各段预设名(如 "线性 / 缓入")或 null(曲线关闭)
-    function buildReport(comp, props, propNames, plan, result, st, curveNames) {
+    // segMeta = 各段 {name, x1, y1, x2, y2} 或 null(动效整理段用,v0.3.3)
+    function buildReport(comp, props, propNames, plan, result, st, curveNames, segMeta) {
         var report = [];
         report.push("QuickKey 打帧报告 · " + MODE_NAMES[st.mode] + " · 节点 " + st.count
             + " · 数值输入 " + VTYPE_NAMES[st.vtype]);
@@ -879,7 +1143,47 @@
             report.push(cl);
         }
         report.push("结果: " + result.kfCount + " 个关键帧 · " + result.badCount + " 个未生效");
+
+        // ────── 动效整理(v0.3.3):对象 + 节点/曲线竖排,便于核对当前动效 ──────
+        report.push("");
+        report.push("────── 动效整理 ──────");
+        // 对象行:每个选中属性一行(合成 · 图层 · 属性名 · 维度)
+        for (var oi = 0; oi < props.length; oi++) {
+            var objDesc = "「" + comp.name + "」";
+            try {
+                var oli = propLayerInfo(props[oi]);
+                if (oli && oli.name) { objDesc += " · " + oli.name; }
+            } catch (e9) {}
+            objDesc += " · " + propNames[oi];
+            var odim = 0;
+            try { odim = propDimOf(props[oi]); } catch (e10) {}
+            if (odim > 0) { objDesc += " (" + odim + "D)"; }
+            report.push("对象: " + objDesc);
+        }
+        // 节点 + 曲线竖排:只列实际打帧的节点(fixed/empty),关闭与非法跳过
+        var disp = [];
+        for (var d1 = 0; d1 < plan.length; d1++) {
+            if (!plan[d1].closed && plan[d1].kind !== "bad") { disp.push(plan[d1]); }
+        }
+        for (var d2 = 0; d2 < disp.length; d2++) {
+            var nd = disp[d2];
+            var nt = comp.time + nd.offset * comp.frameDuration;
+            report.push("节点" + nd.slot + "  " + nt.toFixed(2) + "s  (" + fmtFrames(nd.offset) + ")   值 "
+                + ((nd.kind === "empty") ? "当前值" : describeVal(nd.value)));
+            // 该节点与下一个节点之间的曲线段(段序 = 打帧节点序,正常情况与面板段一一对应)
+            if (d2 < disp.length - 1 && segMeta && segMeta[d2]) {
+                var sm = segMeta[d2];
+                report.push("  ↓ " + sm.name + "  [" + fmtBz(sm.x1) + ", " + fmtBz(sm.y1)
+                    + ", " + fmtBz(sm.x2) + ", " + fmtBz(sm.y2) + "]");
+            }
+        }
         return report.join("\n");
+    }
+
+    // bezier 数值显示:去浮点尾巴(0.58 → "0.58", 1 → "1")
+    function fmtBz(n) {
+        var r = Math.round(n * 1000) / 1000;
+        return String(r);
     }
 
     // 表达式(表达式模式,支线):写入选中属性,不排关键帧
@@ -959,14 +1263,20 @@
             smoothEnd: state.curve.smoothEnd    // v0.2.15:端点平滑
         });
         var curveNames = null;
+        var segMeta = null;   // v0.3.3:动效整理段用——每段 {name, x1, y1, x2, y2}
         if (curveSegs !== null) {
             curveNames = [];
+            segMeta = [];
             for (var cn = 0; cn < curveSegs.length; cn++) {
-                curveNames.push(ensureCurveSeg(cn + 1).preset || "自定义");
+                var csg = ensureCurveSeg(cn + 1);
+                curveNames.push(csg.preset || "自定义");
+                segMeta.push({name: csg.preset || "自定义",
+                    x1: curveSegs[cn].x1, y1: curveSegs[cn].y1,
+                    x2: curveSegs[cn].x2, y2: curveSegs[cn].y2});
             }
             curveNames = curveNames.join(" / ");
         }
-        lastReport = buildReport(comp, props, propNames, plan, result, state, curveNames);
+        lastReport = buildReport(comp, props, propNames, plan, result, state, curveNames, segMeta);
         var msg = "完成:" + result.kfCount + " 个关键帧 · " + props.length + " 个属性 · " + MODE_NAMES[state.mode];
         if (result.curveMissed > 0) { msg += " · " + result.curveMissed + " 帧未套上曲线(点「调试」看明细)"; }
         else if (result.curveApplied > 0) { msg += " · 曲线已套用"; }
@@ -1149,7 +1459,7 @@
             grpMode.orientation = "row";
             grpMode.alignChildren = ["fill", "center"];
             grpMode.spacing = 6;
-            grpMode.add("statictext", undefined, "当前时间指示器作为:");
+            grpMode.add("statictext", undefined, "当前时间指示器作为:锚点");
             var ddMode = grpMode.add("dropdownlist", undefined, MODE_NAMES);
             ddMode.selection = ddMode.items[0];   // 默认起始帧
             ddMode.onChange = function () {
@@ -1199,11 +1509,11 @@
             var hSp = head.add("statictext", undefined, "");
             hSp.preferredSize.width = 18;
             var hLbl = head.add("statictext", undefined, "节点");
-            hLbl.preferredSize.width = 130;
+            hLbl.preferredSize.width = 80;
             var hGap = head.add("statictext", undefined, "间隔");
-            hGap.preferredSize.width = 40;
+            hGap.preferredSize.width = 55;
             var hVal = head.add("statictext", undefined, "数值");
-            hVal.preferredSize.width = 120;
+            hVal.preferredSize.width = 190;
             var hTme = head.add("statictext", undefined, "时间");
             hTme.preferredSize.width = 50;
 
@@ -1216,15 +1526,15 @@
                 var it = {row: row};
                 it.chk = row.add("checkbox", undefined, "");
                 it.lbl = row.add("statictext", undefined, "节点" + slot);
-                it.lbl.preferredSize.width = 130;
+                it.lbl.preferredSize.width = 80;   // v0.3.1:锚点行文字改短,标签列收窄
                 it.inp = row.add("edittext", undefined, String(state.gap[slot]));
-                it.inp.characters = 3;
+                it.inp.characters = 5;   // v0.3.1:间隔框加宽,可显示 5 位数字
                 bindNumTab(it.inp);
                 it.vin = [];
                 for (var k = 0; k < 3; k++) {
                     (function (k2) {
                         var box = row.add("edittext", undefined, "");
-                        box.characters = 4;
+                        box.characters = 6;   // v0.3.1:数值框加宽,可显示 5 位数字(含负号/小数点)
                         bindNumTab(box);
                         box.onChange = function () {
                             state.val[slot][k2] = box.text;   // 框对格直写(v0.1.7 数组存储)
@@ -1290,13 +1600,13 @@
             var sh2 = segHead.add("statictext", undefined, "预设");
             sh2.preferredSize.width = 92;
             var sh3 = segHead.add("statictext", undefined, "x1");
-            sh3.preferredSize.width = 44;
+            sh3.preferredSize.width = 52;
             var sh4 = segHead.add("statictext", undefined, "y1");
-            sh4.preferredSize.width = 44;
+            sh4.preferredSize.width = 52;
             var sh5 = segHead.add("statictext", undefined, "x2");
-            sh5.preferredSize.width = 44;
+            sh5.preferredSize.width = 52;
             var sh6 = segHead.add("statictext", undefined, "y2");
-            sh6.preferredSize.width = 44;
+            sh6.preferredSize.width = 52;
 
             // 下拉 items = [自定义] + 全部预设名(v0.2.2:创建行时即全量)
             function ddItemsForPresets() {
@@ -1322,7 +1632,7 @@
                 for (var d = 0; d < 4; d++) {
                     (function (d2) {
                         var box = row.add("edittext", undefined, "");
-                        box.characters = 4;
+                        box.characters = 5;   // v0.3.1:曲线数值框加宽,可显示 5 位(如 0.125)
                         bindNumTab(box);   // v0.2.7:Tab 键参与数字框循环
                         box.onChange = function () {
                             var seg = ensureCurveSeg(si);
@@ -1370,6 +1680,239 @@
             btnDebug.onClick = showReport;
             status = pal.add("statictext", undefined, "就绪:选中属性 → 设间隔/数值 → 打帧(数值留空=用当前值)");
             status.alignment = ["fill", "top"];
+        }
+
+        // ---------- 预设管理(v0.3.5):4 槽位 + 双层持久化 + 导出导入 ----------
+        // 对齐 AE-Lyrics-Animator / Rolling-Lyrics / Water-Rise 方案:
+        //   工程目录 quickkey_配置.json(跟工程走,读优先)+ app.settings(Section=QuickKey 全局保底)
+        var SETTINGS_SECTION = "QuickKey";
+        var SETTINGS_KEY_PREFIX = "preset_";
+        var PRESET_FILENAME = "quickkey_配置.json";
+        var loadBtns = [];   // 「使用」按钮(无数据时禁用)
+
+        function getProjectPresetFile() {
+            try {
+                var pf = app.project.file;
+                if (pf && pf.parent) { return new File(pf.parent.fsName + "/" + PRESET_FILENAME); }
+            } catch (e) {}
+            return null;
+        }
+
+        function readFromProjectFile() {
+            try {
+                var f = getProjectPresetFile();
+                if (!f || !f.exists) { return null; }
+                f.encoding = "UTF-8";
+                if (!f.open("r")) { return null; }
+                var txt = f.read();
+                f.close();
+                return (txt && txt.length > 0) ? txt : null;
+            } catch (e) { return null; }
+        }
+
+        function writeToProjectFile(text) {
+            try {
+                var f = getProjectPresetFile();
+                if (!f) { return false; }
+                f.encoding = "UTF-8";
+                if (!f.open("w")) { return false; }
+                var ok = f.write(text);
+                f.close();
+                return ok;
+            } catch (e) { return false; }
+        }
+
+        function deleteProjectFile() {
+            try {
+                var f = getProjectPresetFile();
+                if (f && f.exists) { f.remove(); }
+            } catch (e) {}
+        }
+
+        function readSlotFromSettings(idx) {
+            try {
+                if (app.settings.haveSetting(SETTINGS_SECTION, SETTINGS_KEY_PREFIX + idx)) {
+                    return app.settings.getSetting(SETTINGS_SECTION, SETTINGS_KEY_PREFIX + idx);
+                }
+            } catch (e) {}
+            return null;
+        }
+
+        function writeSlotToSettings(idx, text) {
+            try { app.settings.saveSetting(SETTINGS_SECTION, SETTINGS_KEY_PREFIX + idx, text); return true; }
+            catch (e) { return false; }
+        }
+
+        function deleteSlotFromSettings(idx) {
+            try { app.settings.deleteSetting(SETTINGS_SECTION, SETTINGS_KEY_PREFIX + idx); } catch (e) {}
+        }
+
+        // 4 槽位 → 数组(空槽位 = {},供序列化)
+        function slotsArray() {
+            var arr = [];
+            for (var i = 1; i <= 4; i++) { arr.push(state.slots[i] || {}); }
+            return arr;
+        }
+
+        function hasAnyParam(obj) {
+            if (!obj || typeof obj !== "object") { return false; }
+            for (var k in obj) { return true; }
+            return false;
+        }
+
+        // 存储当前全部参数到槽位(内存 + 双写)
+        function saveSlot(idx) {
+            var params = collectParams(state);
+            state.slots[idx] = params;
+            var fileOk = writeToProjectFile(stringifyConfig(params, state.curve.presets, slotsArray()));
+            var setOk = writeSlotToSettings(idx, stringifyConfig(params, [], [{}, {}, {}, {}]));
+            updatePresetButtons();
+            setStatus("已存储槽位 " + idx + "(工程 " + (fileOk ? "✓" : "✗") + " · 全局 " + (setOk ? "✓" : "✗") + ")");
+        }
+
+        // 载入槽位:参数写回 state → 单向流刷新(改 state 即全面板重绘)
+        function loadSlot(idx) {
+            var p = state.slots[idx];
+            if (!p || !hasAnyParam(p)) { setStatus("槽位 " + idx + " 无预设(先「存储」)"); return; }
+            applyParamsToState(state, p);
+            refresh();
+            pal.layout.layout(true);
+            setStatus("已载入槽位 " + idx + " 预设");
+        }
+
+        // 清除全部:内存 + 工程 JSON + 全局设置 三处
+        function clearAllPresets() {
+            state.slots = {};
+            deleteProjectFile();
+            for (var i = 1; i <= 4; i++) { deleteSlotFromSettings(i); }
+            updatePresetButtons();
+            setStatus("已清除全部预设(工程 JSON + 全局设置)");
+        }
+
+        // 复位:参数回默认(曲线库保留)
+        function resetParams() {
+            applyParamsToState(state, {});
+            refresh();
+            pal.layout.layout(true);
+            setStatus("参数已复位为默认值");
+        }
+
+        // 启动时载入槽位:工程 JSON 优先,app.settings 保底(只恢复槽位,不覆盖当前参数)
+        function loadSlotsFromStorage() {
+            var txt = readFromProjectFile();
+            if (txt) {
+                var cfg = parseConfigText(txt);
+                if (cfg) {
+                    for (var i = 0; i < 4; i++) {
+                        if (hasAnyParam(cfg.slots[i])) { state.slots[i + 1] = cfg.slots[i]; }
+                    }
+                    return;
+                }
+            }
+            for (var j = 1; j <= 4; j++) {
+                var st = readSlotFromSettings(j);
+                if (st) {
+                    var c2 = parseConfigText(st);
+                    if (c2 && hasAnyParam(c2.params)) { state.slots[j] = c2.params; }
+                }
+            }
+        }
+
+        // 导出配置:当前参数 + 曲线库 + 4 槽位 全量备份(UTF-8)
+        function exportConfig() {
+            try {
+                var f = File.saveDialog("导出 QuickKey 全参数配置 (JSON)",
+                    "JSON 文件:*.json;*.*", projectFileDir() + "/quickkey_配置.json");
+                if (!f) { return; }
+                f.encoding = "UTF-8";
+                if (!f.open("w")) { setStatus("导出失败:无法写入文件"); return; }
+                var txt = stringifyConfig(collectParams(state), state.curve.presets, slotsArray());
+                var ok = f.write(txt);
+                f.close();
+                setStatus(ok ? "已导出全参数配置 → " + f.fsName : "导出失败:写入出错");
+            } catch (e) { setStatus("导出失败:" + errMsg(e)); }
+        }
+
+        // 导入配置:应用当前参数 + 合并曲线库 + 载入槽位
+        function importConfig() {
+            try {
+                var f = File.openDialog("导入 QuickKey 全参数配置 (JSON)", "JSON 文件:*.json;*.*");
+                if (!f) { return; }
+                f.encoding = "UTF-8";
+                if (!f.open("r")) { setStatus("导入失败:无法打开文件"); return; }
+                var txt = f.read();
+                f.close();
+                var cfg = parseConfigText(txt);
+                if (!cfg || !cfg.params) { setStatus("导入失败:文件里没有合法配置"); return; }
+                applyParamsToState(state, cfg.params);
+                if (cfg.presets && cfg.presets.length > 0) {
+                    state.curve.presets = mergePresets(state.curve.presets, cfg.presets);
+                }
+                for (var i = 0; i < 4; i++) {
+                    if (hasAnyParam(cfg.slots[i])) { state.slots[i + 1] = cfg.slots[i]; }
+                }
+                rebuildPresetDropdowns();
+                refresh();
+                pal.layout.layout(true);
+                updatePresetButtons();
+                setStatus("已导入配置:参数 + " + (cfg.presets ? cfg.presets.length : 0)
+                    + " 个曲线预设 + 槽位");
+            } catch (e) { setStatus("导入失败:" + errMsg(e)); }
+        }
+
+        // 「使用」按钮可用性:槽位有数据才可点
+        function updatePresetButtons() {
+            for (var i = 0; i < loadBtns.length; i++) {
+                loadBtns[i].enabled = hasAnyParam(state.slots[i + 1]);
+            }
+        }
+
+        // 预设管理 UI:存储 1-4 | 清除全部 / 使用 1-4 | 复位 / 导出配置 | 导入配置
+        function buildPresetArea() {
+            var pPre = pal.add("panel", undefined, "预设管理(工程 JSON + 全局设置双层存储)");
+            pPre.orientation = "column";
+            pPre.alignChildren = ["fill", "top"];
+            pPre.spacing = 4;
+            var saveRow = pPre.add("group");
+            saveRow.orientation = "row";
+            saveRow.alignChildren = ["left", "center"];
+            saveRow.spacing = 4;
+            var sLbl = saveRow.add("statictext", undefined, "存储");
+            sLbl.preferredSize.width = 40;
+            for (var i = 1; i <= 4; i++) {
+                (function (idx) {
+                    var b = saveRow.add("button", undefined, String(idx));
+                    b.preferredSize.width = 28;
+                    b.onClick = function () { saveSlot(idx); };
+                })(i);
+            }
+            var btnClear = saveRow.add("button", undefined, "清除全部");
+            btnClear.onClick = clearAllPresets;
+            var loadRow = pPre.add("group");
+            loadRow.orientation = "row";
+            loadRow.alignChildren = ["left", "center"];
+            loadRow.spacing = 4;
+            var lLbl = loadRow.add("statictext", undefined, "使用");
+            lLbl.preferredSize.width = 40;
+            for (var j = 1; j <= 4; j++) {
+                (function (idx) {
+                    var b2 = loadRow.add("button", undefined, String(idx));
+                    b2.preferredSize.width = 28;
+                    b2.enabled = false;
+                    b2.onClick = function () { loadSlot(idx); };
+                    loadBtns.push(b2);
+                })(j);
+            }
+            var btnReset = loadRow.add("button", undefined, "复位");
+            btnReset.onClick = resetParams;
+            var ioRow = pPre.add("group");
+            ioRow.orientation = "row";
+            ioRow.alignChildren = ["left", "center"];
+            ioRow.spacing = 4;
+            var btnExp = ioRow.add("button", undefined, "导出配置");
+            btnExp.onClick = exportConfig;
+            var btnImp = ioRow.add("button", undefined, "导入配置");
+            btnImp.onClick = importConfig;
         }
 
         // 段下拉与当前 4 值同步:匹配预设 → 显示预设名;否则「自定义」
@@ -1425,7 +1968,7 @@
                     it.vin[k].text = cells[k];   // 直读格子(v0.1.7)
                 }
                 if (isAnchor) {
-                    it.lbl.text = "当前时间指示器(锚点)";
+                    it.lbl.text = "锚点";
                     it.tme.text = "固定 +0";
                 } else {
                     it.lbl.text = "节点" + s;
@@ -1471,7 +2014,10 @@
         buildHeader();
         buildNodeArea();
         buildCurveArea();
+        buildPresetArea();
         buildFooter();
+        loadSlotsFromStorage();    // v0.3.5:启动恢复槽位(工程 JSON 优先)
+        updatePresetButtons();
         nodePool.ensure(state.count);
         refresh();   // 曲线段行懒增长:refresh() 里按需建
 
@@ -1500,6 +2046,17 @@
             stringifyPresets: stringifyPresets,
             extractPresetsFallback: extractPresetsFallback,
             parsePresetsText: parsePresetsText,
+            collectParams: collectParams,                 // v0.3.5 全参数预设
+            applyParamsToState: applyParamsToState,
+            decodeOn: decodeOn,
+            decodeNums: decodeNums,
+            decodeVal: decodeVal,
+            decodeSeg: decodeSeg,
+            jsonStringify: jsonStringify,
+            stringifyConfig: stringifyConfig,
+            parseConfigText: parseConfigText,
+            extractParamsFromBlock: extractParamsFromBlock,
+            extractSlotsFallback: extractSlotsFallback,
             MODE_NAMES: MODE_NAMES
         };
     }
