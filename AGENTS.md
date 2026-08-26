@@ -26,6 +26,7 @@
 - 每次改动遵循单项目规范：README / AGENTS / DEVELOPMENT / CHANGELOG 四件套同步（见知识库 `../单项目规范/README.md`）
 - 脚本头部保留 `Version / Description` 注释；版本号变更进 CHANGELOG
 - **待开发插件（禁止部署/安装）**：MountainSpectrum（2026-08-18 标注，内容已清理出主目录；源码在 `D:\workbuddy\2026-08-12-17-14-47\ae-scripts\MountainSpectrum.jsx`）
+- **使用技巧**：AE 通用技巧进 `tips/ae/`，插件进阶用法进 `tips/tools/`（文件名与 `panels/` 目录对应），与插件 README 双向链接；与 knowledge-base（开发规范）边界不变
 
 ## 常用命令
 

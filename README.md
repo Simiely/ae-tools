@@ -12,6 +12,7 @@ ae-tools/
 ├─ panels/                自写 · ScriptUI 面板 → Window > Extensions
 ├─ scripts/               自写 · 无 UI 脚本（预留）→ File > Scripts
 ├─ third-party/           收集 · 第三方/外部脚本（README 标注来源）→ 按类型部署
+├─ tips/                  使用技巧知识库（AE 通用 + 插件进阶用法）→ tips/README.md
 ├─ extensions/ · lib/ · samples/   （预留）
 └─ releases/              发行版压缩包归档
 ```
@@ -68,6 +69,7 @@ python install.py --dry-run  # 先看会装什么
 - 项目规则（技术栈、关键坑、约定）→ [AGENTS.md](AGENTS.md)
 - 架构与问题记录（一坑一篇）→ [DEVELOPMENT.md](DEVELOPMENT.md)
 - 变更记录 → [CHANGELOG.md](CHANGELOG.md)
+- 使用技巧（AE 通用 + 插件进阶用法）→ [tips/README.md](tips/README.md)
 - 单项目规范（知识库）→ knowledge-base/单项目规范/README.md
 
 ## 边界
