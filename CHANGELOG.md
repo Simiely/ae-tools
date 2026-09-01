@@ -1,5 +1,9 @@
 # 更新日志（CHANGELOG）
 
+## v1.3.7
+
+- **NumCounter** 修复「保存预设报错」(面板 v0.2.5):根因 = v0.2.2 用 `app.settings.saveSetting(..., "user")` 第 4 参传字符串, 而官方指南第 4 参是 `prefType`(无符号整数)被拒;改为预设存**工程目录文件** `NumCounter.presets`(UTF-8, 每行 `name|序列化串`), 跟随工程走、无 1999 字节上限; 工程未保存提示先存盘, 写文件需开「允许脚本写入文件」。来源: ae-scripting.docsforadobe.dev · Settings object
+
 ## v1.3.6
 
 - **NumCounter** 修复「生成成功但数字不动」(面板 v0.2.4):根因 = 控制空对象被 `enabled=false` 禁用致滑块关键帧播放时不更新(Adobe HelpX + CSDN AE 社区确认);另修多次运行同名控制层命中旧层、关键帧锚点越界。修法: 控制层保持 enabled、生成前清理旧控制层/数位层、关键帧锚点兜底、表达式改 `ctrl.effect("数值")(1)` 标准写法
