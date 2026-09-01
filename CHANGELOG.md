@@ -2,7 +2,11 @@
 
 ## v1.3.4
 
-- **NumCounter** 修复 Panel 上下文「对象无效」根因(面板 v0.2.2):改用 `app.scheduleTask` 延迟执行生成;新增调试输出区(实时诊断 + 失败弹窗);新增预设存储/使用(`app.settings` 持久化参数组合)
+- **NumCounter** 面板 v0.2.2:新增调试输出区(实时诊断 + 失败弹窗/状态栏/调试框三处详情);新增预设存储/使用(`app.settings` 持久化参数组合)。注: 当时把 `app.scheduleTask` 误当「对象无效」根因, 实测未打中, 真正根因见 v1.3.5
+
+## v1.3.5
+
+- **NumCounter** 修复「对象无效」**权威根因**(面板 v0.2.3):`Effects` 是 AE 索引属性组, 每次 `addProperty` 使同组既有引用失效, 第 319 行 `fxVal.property(1)` 在后续 addProperty 后已失效;修法 = 三滑块 addProperty 全部完成后按名字重新取回再访问子属性;数位表达式滑块值改索引 `(1)` 与脚本一致。来源: ae-scripting.docsforadobe.dev + omino blog + Dan Ebberts/Tomas Sinkunas(Adobe 社区)
 
 ## v1.3.3
 

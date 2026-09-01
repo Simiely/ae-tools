@@ -245,9 +245,9 @@
     function buildSlotExpr(slotIndex, slotCount, ctrlName) {
         return ""
             + 'var ctrl = thisComp.layer("' + ctrlName + '");\n'
-            + 'var val = ctrl("Effects")("数值")("滑块");\n'
-            + 'var step = ctrl("Effects")("步进")("滑块");\n'
-            + 'var dec = ctrl("Effects")("小数位")("滑块");\n'
+            + 'var val = ctrl("Effects")("数值")(1);\n'
+            + 'var step = ctrl("Effects")("步进")(1);\n'
+            + 'var dec = ctrl("Effects")("小数位")(1);\n'
             + 'if (step > 0) { val = Math.round(val / step) * step; }\n'
             + 'var f = 1; for (var i = 0; i < dec; i++) { f = f * 10; }\n'
             + 'val = Math.round(val * f) / f;\n'
@@ -339,7 +339,8 @@
     }
 
     // ---- 主生成逻辑: 始终拆成每位数位图层 + 控制空对象 ----
-    // 注意: 由 onClick 通过 app.scheduleTask 延迟调用, 规避 Panel 上下文 "对象无效"
+    // 由 onClick 通过 app.scheduleTask 延迟一帧调用, 仅为避免面板回调长时间阻塞 UI 重绘;
+    //   真正的「对象无效」修复见下方 Effects 引用复取(非 scheduleTask)
     function buildCounter(pal) {
         gDiag.length = 0;
         try {
@@ -389,16 +390,23 @@
             var cy = comp.height / 2;
 
             // 控制空对象: 数值/步进/小数位 滑块(数位图层统一引用)
+            // 权威修复(见 ae-scripting.docsforadobe.dev > PropertyBase > Reference invalidation;
+            //   omino.com/pixelblog/2009/08/04/ae-scripting-notes; Dan Ebberts / Tomas Sinkunas 在
+            //   Adobe 社区确认): Effects 是「索引属性组」, 每调用一次 addProperty 就会使同组内
+            //   所有既有引用失效。因此绝不能在一次添加后、下一次添加前持有该引用去访问子属性;
+            //   正确做法是: 三个效果全部 addProperty 完, 再按名字重新取回, 然后访问其子属性。
             var ctrl = comp.layers.addNull();
             ctrl.name = CTRL_NAME;
             diag("ctrl 创建: name=" + ctrl.name + " instanceof Layer=" + (ctrl instanceof Layer));
-            var fxVal = ctrl.Effects.addProperty("ADBE Slider Control");
-            fxVal.name = "数值";
-            var fxStep = ctrl.Effects.addProperty("ADBE Slider Control");
-            fxStep.name = "步进";
-            var fxDec = ctrl.Effects.addProperty("ADBE Slider Control");
-            fxDec.name = "小数位";
-            diag("fxVal: typeof=" + (typeof fxVal) + " instanceof PropertyGroup=" + (fxVal instanceof PropertyGroup)
+            // 仅依次添加并命名, 不在此处持有引用去取值(否则下一次 addProperty 会使其失效)
+            ctrl.Effects.addProperty("ADBE Slider Control").name = "数值";
+            ctrl.Effects.addProperty("ADBE Slider Control").name = "步进";
+            ctrl.Effects.addProperty("ADBE Slider Control").name = "小数位";
+            // 全部加完后再按名字重新取回(此前的引用已失效) —— 关键修复
+            var fxVal = ctrl.Effects.property("数值");
+            var fxStep = ctrl.Effects.property("步进");
+            var fxDec = ctrl.Effects.property("小数位");
+            diag("复取: 数值 typeof=" + (typeof fxVal) + " instanceof PropertyGroup=" + (fxVal instanceof PropertyGroup)
                 + " numProperties=" + (fxVal ? fxVal.numProperties : "?"));
 
             var r1 = sliderValueProp(fxVal);
@@ -464,7 +472,7 @@
             }
             diag("数位图层生成 OK: 共 " + slotCount + " 个");
 
-            ctrl.selected = true;
+            try { ctrl.selected = true; } catch (e) { diag("ctrl.selected 抛错(忽略): " + e.message); }
 
             setStatus(pal,
                 "✓ 已生成: " + startVal + "→" + targetVal + " / " + frames + "帧"

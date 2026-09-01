@@ -32,7 +32,7 @@ ae-tools/
 | 音频缩放 AudioScale | `panels/AudioScale/` | 面板 | Window > Extensions | 稳定 | Simiely/AudioScale |
 | 星空生成器 starry-sky-generator | `panels/starry-sky-generator/` | 面板 | Window > Extensions | 稳定 | Simiely/starry-sky-generator |
 | 快速K帧 QuickKey | `panels/QuickKey/` | 面板 | Window > Extensions | 开发中（v0.3.6，内置 cubic 预设） | 新插件（本仓库首发） |
-| 数字计数器 NumCounter | `panels/NumCounter/` | 面板 | Window > Extensions | 开发中（v0.2.2，独立数位/odometer + 字体字重两级联动 + 预设存储 + 调试输出区；修复 Panel 上下文「对象无效」） | 新插件（本仓库首发） |
+| 数字计数器 NumCounter | `panels/NumCounter/` | 面板 | Window > Extensions | 开发中（v0.2.3，独立数位/odometer + 字体字重两级联动 + 预设存储 + 调试输出区；修复「对象无效」权威根因 = Effects 索引属性组 addProperty 使同组引用失效） | 新插件（本仓库首发） |
 
 ### 待开发（WIP，暂不部署）
 

@@ -1,8 +1,16 @@
 # 更新日志（CHANGELOG）
 
-## v0.2.2（2026-09-01 真机修复 + 预设 + 调试）
+## v0.2.3（2026-09-01 「对象无效」权威根因修复）
 
-- **修复「对象无效」根因**: 第 319 行 `fxVal.property(1)` 在「窗口›扩展」Panel 上下文被 AE 判为无效对象。真正根因是 Panel 按钮 onClick 直接对 AE 项目树做深层修改的已知坑, 改用 `app.scheduleTask` 把生成逻辑延迟一帧到主线程上下文执行(此前 openInViewer/enabled 后移未打中)
+- **真正根因(经搜索权威确认)**: `Effects` 是 AE 的「索引属性组」, 每次 `addProperty()` 都会使同组内**所有既有引用失效**(ae-scripting.docsforadobe.dev > PropertyBase > Reference invalidation; omino blog; Dan Ebberts / Tomas Sinkunas 在 Adobe 社区确认)。v0.2.0–v0.2.2 连续报错的第 319 行 `fxVal.property(1)` 正是因为在 `fxStep`/`fxDec` 的 addProperty 之后, `fxVal` 已被判无效
+- **权威修法**: 三个滑块效果全部 `addProperty` 完成后, **再按名字重新取回**(`ctrl.Effects.property("数值")` 等)再访问其子属性; 绝不在两次 addProperty 之间持有引用取值
+- **表达式同步**: 数位图层 sourceText 表达式引用滑块值改为索引 `("数值")(1)`, 与脚本侧一致且不受 AE 语言包影响
+- **scheduleTask 纠错**: v0.2.2 把 scheduleTask 误当根因修复, 本版更正 —— 它只是避免面板回调阻塞 UI, 与「对象无效」无关
+- 面板 CHANGELOG v0.2.3 / 根 CHANGELOG v1.3.5
+
+## v0.2.2（2026-09-01 调试 + 预设）
+
+- **调试输出区 + 预设**: 本版新增「调试输出」只读框与预设存储(见下); 另加 `app.scheduleTask` 延迟生成逻辑。**注意**: 当时把 scheduleTask 误判为「对象无效」根因修复, 实测未打中 —— 真正根因见 v0.2.3(索引属性组 addProperty 使同组引用失效)
 - **调试输出区**: 面板底部新增「调试输出」只读框, 每次生成实时显示诊断(comp/ctrl/fxVal 类型·instanceof·numProperties·三层 property 尝试结果); 失败时额外弹窗 + 状态栏 + 调试框三处给详情, 便于复制反馈
 - **预设存储/使用**: 用 `app.settings` 跨会话持久化参数组合; 新增「预设」区(下拉 + 保存/应用/删除); 序列化纯函数 serializePreset/deserializePreset 进 test(新增 13 断言, 共 32)
 
