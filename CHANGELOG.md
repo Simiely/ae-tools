@@ -1,5 +1,9 @@
 # 更新日志（CHANGELOG）
 
+## v1.3.1
+
+- **NumCounter** 真机修复(面板 v0.1.1):`ParagraphJustification` 枚举成员名改为 `*_JUSTIFY` 导致报错,改兼容写法;字体由手填改为系统字体下拉(`app.fonts.allFonts`)
+
 ## v1.3.0（当前版本）
 
 - 新增 **NumCounter**(`panels/NumCounter/`,面板 v0.1.0):数字计数器面板 —— 填起始/目标/帧数一键生成数字递增动画

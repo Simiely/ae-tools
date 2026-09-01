@@ -1,5 +1,11 @@
 # 更新日志（CHANGELOG）
 
+## v0.1.1（2026-09-01 真机修复）
+
+- **修复**:`doc.justification` 在 AE 2026 报错「无法设置 justification,值未定义」—— 根因是 `ParagraphJustification` 成员名已从 `LEFT/CENTER/RIGHT` 改为 `LEFT_JUSTIFY/CENTER_JUSTIFY/RIGHT_JUSTIFY`。改用 `getJustification()` 兼容两种命名,取不到则跳过(不再崩溃)
+- **改进**:字体由手填 edittext 改为**系统字体下拉**(基于 `app.fonts.allFonts` 枚举家庭名,映射 PostScript 名);「等宽锁定」勾选时自动禁用字体下拉并强制 Consolas
+- 字体/对齐设置均包 try/catch,单一项失败不影响计数动画
+
 ## v0.1.0（当前版本, 2026-09-01 首发）
 
 - 新增 **NumCounter**(`panels/NumCounter/`):数字计数器面板 —— 填起始/目标/帧数,一键生成数字递增动画

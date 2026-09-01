@@ -64,6 +64,60 @@
     // 以下为 AE 运行环境代码
     // ============================================================
 
+    // ---- 字体枚举: 从 app.fonts (AE 24.0+) 取系统字体做下拉 ----
+    // gFontList: 下拉项(家庭名, 含「(默认)」与等宽字体); gFontMap: 家庭名 -> PostScript 名
+    var gFontList = ["（默认）"];
+    var gFontMap = {};
+    function ensureMonoInList(name) {
+        for (var i = 0; i < gFontList.length; i++) {
+            if (gFontList[i] === name) { return; }
+        }
+        gFontList.push(name);
+        gFontMap[name] = name;
+    }
+    function collectFonts() {
+        try {
+            if (typeof app.fonts === "undefined" || !app.fonts) { return; }
+            var all = app.fonts.allFonts;
+            if (!all || !all.length) { return; }
+            var seen = {};
+            for (var i = 0; i < all.length; i++) {
+                var fam = all[i];
+                if (!fam) { continue; }
+                var arr = (fam instanceof Array) ? fam : [fam];
+                var first = arr[0];
+                if (!first || !first.familyName) { continue; }
+                var fn = first.familyName;
+                if (seen[fn]) { continue; }
+                seen[fn] = true;
+                gFontList.push(fn);
+                gFontMap[fn] = first.postScriptName || fn;
+            }
+            // 确保常见等宽字体在列表里(未安装则跳过, 仍可用等宽锁定兜底)
+            ensureMonoInList("Consolas");
+            ensureMonoInList("Courier New");
+        } catch (e) { /* 字体枚举失败则用默认列表(仅等宽) */ }
+    }
+
+    // ---- 对齐枚举兼容: AE 2026 成员名为 *_JUSTIFY, 旧版曾用 LEFT/CENTER/RIGHT ----
+    // align: 0 左 / 1 中 / 2 右; 返回 ParagraphJustification 枚举值, 取不到返回 undefined
+    function getJustification(align) {
+        try {
+            var P = ParagraphJustification;
+            if (typeof P === "undefined") { return undefined; }
+            var names = {
+                0: ["LEFT", "LEFT_JUSTIFY"],
+                1: ["CENTER", "CENTER_JUSTIFY"],
+                2: ["RIGHT", "RIGHT_JUSTIFY"]
+            };
+            var ns = names[align] || names[1];
+            for (var i = 0; i < ns.length; i++) {
+                if (P[ns[i]] !== undefined) { return P[ns[i]]; }
+            }
+            return undefined;
+        } catch (e) { return undefined; }
+    }
+
     // ---- 调试模块: 错误对话框 (文字可复制) ----
     function showDebugError(err) {
         try {
@@ -200,7 +254,8 @@
             if (dec > 4) { dec = 4; }
             var tracking = parseFloat(pal.trackInp.text);
             if (isNaN(tracking)) { tracking = 0; }
-            var font = pal.fontInp.text;
+            var fontSel = pal.fontDd.selection ? pal.fontDd.selection.text : "（默认）";
+            var font = (fontSel && fontSel !== "（默认）") ? fontSel : "";
             var mono = pal.monoChk.value;
             var align = pal.alignDd.selection ? pal.alignDd.selection.index : 1; // 0左 1中 2右
             var pre = pal.preInp.text;
@@ -215,16 +270,18 @@
             var doc = tl.sourceText.value;
             doc.fillColor = [1, 1, 1];
             doc.fontSize = 120;
-            if (mono) {
-                doc.font = "Consolas";
-            } else if (font && font.length > 0) {
-                doc.font = font;
-            }
+            try {
+                if (mono) {
+                    doc.font = "Consolas";
+                } else if (font && gFontMap[font]) {
+                    doc.font = gFontMap[font]; // 选中的字体家庭 -> PostScript 名
+                } else if (font) {
+                    doc.font = font; // 直接字符串(如 Consolas / Courier New)
+                }
+            } catch (e) { /* 字体设置失败不影响计数, 保留默认字体 */ }
             doc.tracking = tracking;
-            var just = ParagraphJustification.LEFT;
-            if (align === 1) { just = ParagraphJustification.CENTER; }
-            else if (align === 2) { just = ParagraphJustification.RIGHT; }
-            doc.justification = just;
+            var just = getJustification(align);
+            if (just !== undefined) { doc.justification = just; } // 取不到则保留默认对齐, 避免崩溃
             tl.sourceText.setValue(doc);
 
             // 三个滑块效果: 数值 / 步进 / 小数位 (顺序决定表达式 effect(1/2/3))
@@ -276,8 +333,9 @@
         pal.stepInp.text = "1";
         pal.decInp.text = "0";
         pal.trackInp.text = "0";
-        pal.fontInp.text = "";
+        pal.fontDd.selection = pal.fontDd.items[0]; // 默认
         pal.monoChk.value = true;
+        pal.fontDd.enabled = !pal.monoChk.value;
         pal.alignDd.selection = pal.alignDd.items[1]; // 中
         pal.preInp.text = "";
         pal.sufInp.text = "";
@@ -286,6 +344,7 @@
     }
 
     // ---- 标准面板模式: 停靠为面板时不新建窗口 ----
+    collectFonts(); // 填充字体下拉(必须在建 UI 前)
     var pal = (thisObj instanceof Panel) ? thisObj
         : new Window("palette", "NumCounter · 数字计数器", undefined, { resizeable: false });
     pal.orientation = "column";
@@ -335,11 +394,16 @@
 
     var rf1 = pFont.add("group"); rf1.orientation = "row"; rf1.alignChildren = "center";
     rf1.add("statictext", undefined, "字体:");
-    pal.fontInp = rf1.add("edittext", undefined, ""); pal.fontInp.characters = 14;
-    rf1.add("statictext", undefined, "(留空=默认)");
+    pal.fontDd = rf1.add("dropdownlist", undefined, gFontList);
+    pal.fontDd.selection = pal.fontDd.items[0]; // 默认
+    pal.fontDd.preferredSize.width = 160;
 
     pal.monoChk = pFont.add("checkbox", undefined, "等宽锁定(强制等宽字体, 彻底消除数字抖动)");
     pal.monoChk.value = true;
+    pal.fontDd.enabled = !pal.monoChk.value; // 等宽锁定开启时禁用字体下拉
+    pal.monoChk.onClick = function () {
+        pal.fontDd.enabled = !pal.monoChk.value;
+    };
 
     var rf2 = pFont.add("group"); rf2.orientation = "row"; rf2.alignChildren = "center";
     rf2.add("statictext", undefined, "对齐:");
