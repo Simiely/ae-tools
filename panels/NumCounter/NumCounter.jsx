@@ -245,9 +245,9 @@
     function buildSlotExpr(slotIndex, slotCount, ctrlName) {
         return ""
             + 'var ctrl = thisComp.layer("' + ctrlName + '");\n'
-            + 'var val = ctrl("Effects")("数值")(1);\n'
-            + 'var step = ctrl("Effects")("步进")(1);\n'
-            + 'var dec = ctrl("Effects")("小数位")(1);\n'
+            + 'var val = ctrl.effect("数值")(1);\n'
+            + 'var step = ctrl.effect("步进")(1);\n'
+            + 'var dec = ctrl.effect("小数位")(1);\n'
             + 'if (step > 0) { val = Math.round(val / step) * step; }\n'
             + 'var f = 1; for (var i = 0; i < dec; i++) { f = f * 10; }\n'
             + 'val = Math.round(val * f) / f;\n'
@@ -356,6 +356,23 @@
             // 强制把合成激活到前台 viewer
             try { comp.openInViewer(); diag("openInViewer OK"); } catch (e) { diag("openInViewer 抛错: " + e.message); }
 
+            // 清理上次生成的同类图层(控制层 + 数位层), 避免 thisComp.layer 命中旧的、无关键帧的控制层
+            // (旧控制层无关键帧 => 表达式读到的数值恒定 => 计数不动)
+            try {
+                var toRemove = [];
+                for (var li = 1; li <= comp.numLayers; li++) {
+                    var L = comp.layer(li);
+                    var nm = L ? L.name : "";
+                    if (nm === CTRL_NAME || (nm && nm.indexOf("数位") === 0)) {
+                        toRemove.push(L);
+                    }
+                }
+                for (var ri = 0; ri < toRemove.length; ri++) {
+                    try { toRemove[ri].remove(); } catch (e2) {}
+                }
+                diag("清理旧图层: " + toRemove.length + " 个(控制层/数位层)");
+            } catch (e) { diag("清理旧图层跳过: " + e.message); }
+
             app.beginUndoGroup("NumCounter 生成");
 
             var startVal = parseFloat(pal.startInp.text);
@@ -397,7 +414,7 @@
             //   正确做法是: 三个效果全部 addProperty 完, 再按名字重新取回, 然后访问其子属性。
             var ctrl = comp.layers.addNull();
             ctrl.name = CTRL_NAME;
-            diag("ctrl 创建: name=" + ctrl.name + " instanceof Layer=" + (ctrl instanceof Layer));
+            diag("ctrl 创建: name=" + ctrl.name + " matchName=" + (ctrl.matchName || "?"));
             // 仅依次添加并命名, 不在此处持有引用去取值(否则下一次 addProperty 会使其失效)
             ctrl.Effects.addProperty("ADBE Slider Control").name = "数值";
             ctrl.Effects.addProperty("ADBE Slider Control").name = "步进";
@@ -438,8 +455,11 @@
                 return;
             }
 
+            // 关键帧锚点: 默认锚在当前播放头; 若会超出合成时长, 则回退到 0(保证首播可见)
+            var fd = frames * comp.frameDuration;
             var t0 = comp.time;
-            var t1 = comp.time + frames * comp.frameDuration;
+            if (t0 + fd > comp.duration) { t0 = 0; }
+            var t1 = t0 + fd;
             valProp.setValueAtTime(startVal, t0);
             valProp.setValueAtTime(targetVal, t1);
             stepProp.setValue(step);
@@ -447,8 +467,12 @@
             applyEasing(valProp, ease);
             diag("滑块关键帧设置 OK (数值 " + startVal + "->" + targetVal + ")");
 
-            // 所有属性设置完成后再隐藏控制层(提前禁用会导致子属性被判无效)
-            try { ctrl.enabled = false; diag("ctrl.enabled=false OK"); } catch (e) { diag("ctrl.enabled 抛错: " + e.message); }
+            // 关键修复(证据: Adobe HelpX「表达式错误」+ CSDN AE 社区高采纳):
+            // 控制空对象(Null)本身不渲染任何像素, 无需禁用; 一旦 enabled=false,
+            // 其滑块关键帧在播放时不会更新 => 数位图层读到的数值恒定 => 计数不动。
+            // 故保持 enabled=true, 空对象不可见且关键帧可正常驱动表达式。
+            ctrl.enabled = true;
+            diag("ctrl 保持 enabled=true(空对象不可见, 关键帧驱动表达式正常)");
 
             // 逐个槽位建独立文本图层
             for (var i = 0; i < slotCount; i++) {

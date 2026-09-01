@@ -1,5 +1,19 @@
 # 更新日志（CHANGELOG）
 
+## v0.2.4（2026-09-01 修复「生成成功但数字不动」）
+
+- **现象**: 生成无报错、调试输出全 OK, 但播放时数字不递增
+- **根因(经搜索权威确认, After Effects HelpX「表达式错误」+ CSDN AE 社区高采纳)**:
+  1. 控制空对象被 `ctrl.enabled = false` 禁用(空对象本就不渲染, 禁用纯多余) → 其滑块关键帧在播放时**不更新** → 数位图层读到的数值恒定 → 不动
+  2. 多次运行后存在多个同名 `NumCounter 控制` 层, `thisComp.layer(...)` 可能命中旧的、无关键帧的控制层
+  3. 关键帧锚在 `comp.time`, 播放头在尾部时整段动画落在可视范围外 → 看似不动
+- **修法**:
+  1. 控制层**保持 enabled=true**(空对象不可见且关键帧可正常驱动表达式)
+  2. 生成前**清理上次的控制层 + 数位层**, 保证 `thisComp.layer(CTRL_NAME)` 命中带关键帧的当前控制层
+  3. 关键帧锚点兜底: 播放头锚定, 超出合成时长则回退到 0
+  4. 数位表达式改用 Adobe 官方 pickwhip 标准写法 `ctrl.effect("数值")(1)`(比 `("Effects")` 更稳, 用索引(1)取滑块值、与中文版属性名无关)
+- 面板 CHANGELOG v0.2.4 / 根 CHANGELOG v1.3.6
+
 ## v0.2.3（2026-09-01 「对象无效」权威根因修复）
 
 - **真正根因(经搜索权威确认)**: `Effects` 是 AE 的「索引属性组」, 每次 `addProperty()` 都会使同组内**所有既有引用失效**(ae-scripting.docsforadobe.dev > PropertyBase > Reference invalidation; omino blog; Dan Ebberts / Tomas Sinkunas 在 Adobe 社区确认)。v0.2.0–v0.2.2 连续报错的第 319 行 `fxVal.property(1)` 正是因为在 `fxStep`/`fxDec` 的 addProperty 之后, `fxVal` 已被判无效
