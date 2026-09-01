@@ -1,5 +1,9 @@
 # 更新日志（CHANGELOG）
 
+## v1.3.10
+
+- **NumCounter** 修复「存储槽位后对应使用按钮不变可用」(面板 v0.2.8): ScriptUI 在 `onClick` 回调改别的控件 `.enabled` 后不自动重绘, `updateSlotLoadBtns` 末尾加 `pal.layout.layout(true)` 强制刷新(证据: Adobe 社区 Marc Autret 回答 `win.layout.layout(1)` 标准手法)
+
 ## v1.3.9
 
 - **NumCounter** 预设改为「4 槽位」模式(面板 v0.2.7), 对齐仓库 AE-Lyrics-Animator 等「预设槽」实践: 固定 4 槽位(存储/使用/清空) + 导出导入, `presetsCache` 内存缓存, 持久化只用工程目录 `NumCounter.presets.json`(`{version, slots}` 结构, 手写构造 + 受控 eval 解析, 避开会崩的 `app.settings`)。参数收集/回填复用 `serializePreset`/`deserializePreset`

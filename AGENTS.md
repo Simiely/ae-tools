@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**：2026-09-01（commit `404caeb`）NumCounter v0.2.7（预设改为「4 槽位」模式，对齐仓库 AE-Lyrics-Animator 等「预设槽」实践：固定 4 槽位 + `presetsCache` 内存缓存 + 工程目录 `NumCounter.presets.json` 单层持久化（`{version, slots}` 结构，手写 `slotsToJson` 构造 + 受控 `jsonParseSlots` 解析，避开会崩的 `app.settings`）；参数 `collectParams`/`applyParamsToUI` 复用 `serializePreset`/`deserializePreset`），根文档同步（四件套保持）
+> 📌 **文档基线**：2026-09-01（commit `1c1a6cf`）NumCounter v0.2.8（修复「存储槽位后对应使用按钮不变可用」：ScriptUI 在 `onClick` 回调改别控件 `.enabled` 后不自动重绘，`updateSlotLoadBtns` 末尾加 `pal.layout.layout(true)` 强制刷新，所有调用处补传 `pal`；证据 = Adobe 社区 Marc Autret 回答 `win.layout.layout(1)` 标准手法），根文档同步（四件套保持）
 > **更新文档/代码后，请更新此行**（日期 + 新 commit hash），并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
