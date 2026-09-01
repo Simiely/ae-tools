@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**：2026-09-01（commit `92f1ca3`）NumCounter 升级 v0.2.0（独立数位/odometer + 字体字重两级联动），根文档同步（四件套保持）
+> 📌 **文档基线**：2026-09-01（commit `29a4b37`）NumCounter 修复 v0.2.1（生成时 ReferenceError 对象无效），根文档同步（四件套保持）
 > **更新文档/代码后，请更新此行**（日期 + 新 commit hash），并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
