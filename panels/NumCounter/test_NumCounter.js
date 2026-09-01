@@ -94,6 +94,27 @@ var legacy = T.deserializePreset("start=5&target=12.3&mono=false");
 eq("legacy target", legacy.target, 12.3);
 eq("legacy mono", legacy.mono, false);
 
+// ---- 槽位预设 JSON 构造 / 解析(4 槽位, 空槽位=null) ----
+var cache = { "1": T.serializePreset(po3), "2": null, "3": null, "4": null };
+var sjs = T.slotsToJson(cache);
+eq("slots json 以{开头", sjs.charAt(0), "{");
+eq("slots 含 version", sjs.indexOf('"version": 1') >= 0, true);
+eq("slots 含 槽位1数据", sjs.indexOf('"1": {"start":5') >= 0, true);
+eq("slots 含 槽位2 null", sjs.indexOf('"2": null') >= 0, true);
+var sp = T.jsonParseSlots(sjs);
+eq("slots parse 槽位1 start", sp.slots["1"].start, 5);
+eq("slots parse 槽位1 target", sp.slots["1"].target, 12.3);
+eq("slots parse 槽位1 mono", sp.slots["1"].mono, false);
+eq("slots parse 槽位2 空", sp.slots["2"], null);
+eq("slots parse 槽位4 空", sp.slots["4"], null);
+var cache2 = { "1": T.serializePreset(po), "2": T.serializePreset(po3), "3": null, "4": null };
+var sp2 = T.jsonParseSlots(T.slotsToJson(cache2));
+eq("slots 往返 槽位1 mono", sp2.slots["1"].mono, true);
+eq("slots 往返 槽位2 target", sp2.slots["2"].target, 12.3);
+eq("slots 空cache 槽位1null", T.jsonParseSlots(T.slotsToJson({ "1": null, "2": null, "3": null, "4": null })).slots["1"], null);
+eq("slots 非{返回默认空", T.jsonParseSlots("not json").slots["3"], null);
+eq("slots 非{ version=1", T.jsonParseSlots("not json").version, 1);
+
 console.log("");
 console.log("断言: " + passed + " 通过, " + failed + " 失败");
 if (failed > 0) { process.exit(1); }

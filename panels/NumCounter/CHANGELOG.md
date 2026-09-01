@@ -1,5 +1,16 @@
 # 更新日志（CHANGELOG）
 
+## v0.2.7（2026-09-01 预设改为「4 槽位」模式, 对齐仓库预设槽实践）
+
+- **需求**: 用户要求预设改成仓库其他插件(AE-Lyrics-Animator / starry-sky / Water-Rise / Rolling-Lyrics / QuickKey)统一的「预设槽」形式, 而非 v0.2.5/0.2.6 的「名称下拉 + 保存/应用/删除」
+- **做法(1:1 复用仓库实践, 但避开 app.settings)**:
+  - 参考 **AE-Lyrics-Animator** 的源头实现(`存储1-4 / 使用1-4 / 清除全部 / 复位` 按钮 + `presetsCache` 内存缓存), 改为 NumCounter 的 `存储预设 1-4 / 使用预设 1-4 / 清空全部 / 导出预设… / 导入预设…`
+  - 4 个固定槽位 + `presetsCache["1".."4"]` 内存缓存; **空槽位 = null**(对应「使用」按钮灰色禁用)
+  - 持久化**只用工程目录 JSON**(单层): 启动时 `loadSlotsFromStorage()` 读 `NumCounter.presets.json` 恢复槽位; 文件格式 `{version, slots:{ "1": 参数对象|null, ... "4": null }}`, 手写 `slotsToJson` 构造 + 受控 `jsonParseSlots` 解析(ES3 禁 JSON, 仅 `{` 开头才 eval)
+  - **刻意不采用 `app.settings`**: v0.2.5 已证实 `saveSetting` 第 4 参传字符串会被 AE 拒绝(`user 不是无符号整数`), 故只走工程目录文件, 与「预设跟工程走」诉求一致
+  - 参数收集/回填复用既有 `serializePreset` / `deserializePreset` 归一化, 抽成 `collectParams(pal)` / `applyParamsToUI(pal, p)`
+- 面板 CHANGELOG v0.2.7 / 根 CHANGELOG v1.3.9
+
 ## v0.2.6（2026-09-01 修复「数字始终不动」的真正根因 + 预设升级为 JSON）
 
 - **现象**: v0.2.0–v0.2.5 全程「生成成功但数字不递增」; v0.2.4 把控制层改回 enabled=true 仍无效

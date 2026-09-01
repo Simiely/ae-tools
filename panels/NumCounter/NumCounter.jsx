@@ -1,12 +1,13 @@
 ﻿// ============================================================
 // NumCounter · 数字计数器面板 (ScriptUI Panel, ExtendScript ES3)
 //
-// Version: 0.2.6
+// Version: 0.2.7
 // Description: 一键生成「数字从起始值递增到目标值」的动画。
 //   支持步进、小数位、字间距、字体(家庭+字重)、等宽锁定、对齐、缓动。
 //   动画由「数值」滑块关键帧驱动 + 每位独立文本图层的 sourceText 表达式实时格式化。
 //   生成后仍可拖「数值」滑块关键帧调节奏, 改小数位/步进滑块即时变, 无需重跑脚本。
-//   预设: 存为工程所在目录的 NumCounter.presets.json(标准 JSON 数组, 保存/应用/删除), 跟随工程走。
+//   预设: 对齐仓库 AE-Lyrics-Animator 等「预设槽」实践 —— 固定 4 槽位(存储/使用/清空) + 导出导入,
+//         存于工程所在目录的 NumCounter.presets.json(跟随工程走, 避开会崩的 app.settings)。
 //
 // 2026-09-01 v0.2.6 关键修复: 此前 setValueAtTime(startVal, t0) 把「值」传到了「时间」参数,
 //   关键帧被错放到 100 秒处, 可见播放区间内数值恒≈0 => 数字不动。改为无歧义的
@@ -163,6 +164,50 @@
         if (!str || str.charAt(0) !== "[") { return []; }
         try { return eval("(" + str + ")"); } catch (e) { return []; }
     }
+    // 槽位预设文件 = {version, slots:{ "1": 参数对象|null, ... "4": null }}
+    // 手写构造(ES3 禁用 JSON.stringify); 空槽位 = null(对齐 QuickKey「空槽位={}」的语义, 此处用 null 更利受控 eval 解析)
+    function slotsToJson(cache) {
+        var keys = ["1", "2", "3", "4"];
+        var out = '{\n  "version": 1,\n  "slots": {\n';
+        for (var i = 0; i < keys.length; i++) {
+            var p = cache[keys[i]];
+            var comma = (i < keys.length - 1) ? ",\n" : "\n";
+            if (!p) {
+                out += '    "' + keys[i] + '": null' + comma;
+            } else {
+                out += '    "' + keys[i] + '": {'
+                    + '"start":' + (p.start != null ? p.start : 0) + ','
+                    + '"target":' + (p.target != null ? p.target : 0) + ','
+                    + '"frames":' + (p.frames != null ? p.frames : 30) + ','
+                    + '"step":' + (p.step != null ? p.step : 0) + ','
+                    + '"dec":' + (p.dec != null ? p.dec : 0) + ','
+                    + '"track":' + (p.track != null ? p.track : 0) + ','
+                    + '"font":"' + jsonEscape(p.font != null ? p.font : "（默认）") + '",'
+                    + '"style":"' + jsonEscape(p.style != null ? p.style : "常规") + '",'
+                    + '"align":' + (p.align != null ? p.align : 1) + ','
+                    + '"ease":' + (p.ease != null ? p.ease : 0) + ','
+                    + '"mono":' + (p.mono ? "true" : "false") + '}' + comma;
+            }
+        }
+        out += "  }\n}";
+        return out;
+    }
+    // 读取槽位预设(ES3 禁用 JSON.parse; 仅当首字符为 { 才解析, 防误读非本插件文件)
+    function jsonParseSlots(str) {
+        var empty = { version: 1, slots: { "1": null, "2": null, "3": null, "4": null } };
+        if (!str || str.charAt(0) !== "{") { return empty; }
+        try {
+            var obj = eval("(" + str + ")");
+            var slots = { "1": null, "2": null, "3": null, "4": null };
+            if (obj && obj.slots) {
+                for (var k = 1; k <= 4; k++) {
+                    var sk = String(k);
+                    if (obj.slots[sk]) { slots[sk] = obj.slots[sk]; }
+                }
+            }
+            return { version: (obj && obj.version != null) ? obj.version : 1, slots: slots };
+        } catch (e) { return empty; }
+    }
 
     // node 测试导出: 在 AE 之外(app 未定义)只导出纯函数并返回, 跳过 UI 代码
     if (typeof app === "undefined") {
@@ -171,7 +216,8 @@
                 snapToStep: snapToStep, formatNumber: formatNumber,
                 serializePreset: serializePreset, deserializePreset: deserializePreset,
                 sanitizePresetName: sanitizePresetName,
-                jsonEscape: jsonEscape, presetsToJson: presetsToJson, jsonParseArray: jsonParseArray
+                jsonEscape: jsonEscape, presetsToJson: presetsToJson, jsonParseArray: jsonParseArray,
+                slotsToJson: slotsToJson, jsonParseSlots: jsonParseSlots
             };
         }
         return;
@@ -608,8 +654,12 @@
         }
     }
 
-    // ---- 预设: 存为工程所在目录下的 NumCounter.presets.json(标准 JSON 数组) ----
-    // 取预设文件对象; 工程未保存时返回 null(需在 UI 层提示先保存工程)
+    // ---- 预设槽位: 对齐仓库 AE-Lyrics-Animator 等「预设槽」实践(4 固定槽位 + 工程目录 JSON) ----
+    // presetsCache["1".."4"] = 归一化参数对象|null(空槽位=null); 内存缓存 + 启动恢复
+    // 持久化单层 = 工程目录 NumCounter.presets.json(避开 v0.2.5 已证实会崩的 app.settings)
+    var SLOT_COUNT = 4;
+    var presetsCache = { "1": null, "2": null, "3": null, "4": null };
+    var gSlotLoadBtns = []; // UI 构建后填充, updateSlotLoadBtns 据此启用/禁用「使用」按钮
     function getPresetFile() {
         try {
             if (!app.project || !app.project.file) { return null; }
@@ -618,8 +668,8 @@
             return new File(folder.fsName + "/" + PRESET_FILE_NAME);
         } catch (e) { return null; }
     }
-    // 读取预设数组(本插件写出的标准 JSON 数组; ES3 禁用 JSON.parse, 用受控 eval)
-    function readPresets() {
+    // 读工程 JSON -> 恢复 presetsCache(启动时调用)
+    function loadSlotsFromStorage() {
         var f = getPresetFile();
         if (f && f.exists) {
             try {
@@ -627,78 +677,84 @@
                 if (f.open("r")) {
                     var txt = String(f.read());
                     f.close();
-                    if (txt.charCodeAt(0) === 0xFEFF) { txt = txt.substring(1); } // 去 BOM
-                    var arr = jsonParseArray(txt);
-                    if (arr && arr.length) { return arr; }
+                    if (txt.charCodeAt(0) === 0xFEFF) { txt = txt.substring(1); }
+                    var data = jsonParseSlots(txt);
+                    for (var k = 1; k <= SLOT_COUNT; k++) {
+                        var sk = String(k);
+                        presetsCache[sk] = data.slots[sk] ? data.slots[sk] : null;
+                    }
                 }
             } catch (e) { try { f.close(); } catch (e2) {} }
         }
-        return [];
+        updateSlotLoadBtns();
     }
-    function writePresets(arr) {
+    function writeSlotsToStorage() {
         var f = getPresetFile();
         if (!f) { return false; }
         try {
             f.encoding = "UTF-8";
             if (!f.open("w")) { return false; }
-            f.write(presetsToJson(arr));
+            f.write(slotsToJson(presetsCache));
             f.close();
             return true;
         } catch (e) { try { f.close(); } catch (e2) {} return false; }
     }
-    function getPresetNames() {
-        var arr = readPresets();
-        var names = [];
-        for (var i = 0; i < arr.length; i++) { if (arr[i] && arr[i].name) { names.push(arr[i].name); } }
-        return names;
+    // 当前面板参数 -> 归一化对象(纯收集, 不写文件)
+    function collectParams(pal) {
+        return serializePreset({
+            start: parseFloat(pal.startInp.text) || 0,
+            target: parseFloat(pal.targetInp.text) || 0,
+            frames: parseInt(pal.framesInp.text, 10) || 30,
+            step: parseFloat(pal.stepInp.text) || 0,
+            dec: parseInt(pal.decInp.text, 10) || 0,
+            track: parseFloat(pal.trackInp.text) || 0,
+            font: pal.fontDd.selection ? pal.fontDd.selection.text : "（默认）",
+            style: pal.styleDd.selection ? pal.styleDd.selection.text : "常规",
+            align: pal.alignDd.selection ? pal.alignDd.selection.index : 1,
+            ease: pal.easeDd.selection ? pal.easeDd.selection.index : 0,
+            mono: pal.monoChk.value
+        });
     }
-    function findPreset(name) {
-        var arr = readPresets();
-        for (var i = 0; i < arr.length; i++) { if (arr[i] && arr[i].name === name) { return arr[i]; } }
-        return null;
+    // 参数对象 -> 回填面板控件
+    function applyParamsToUI(pal, p) {
+        if (!p) { return; }
+        pal.startInp.text = String(p.start);
+        pal.targetInp.text = String(p.target);
+        pal.framesInp.text = String(p.frames);
+        pal.stepInp.text = String(p.step);
+        pal.decInp.text = String(p.dec);
+        pal.trackInp.text = String(p.track);
+        var fi = -1;
+        for (var i = 0; i < pal.fontDd.items.length; i++) { if (pal.fontDd.items[i].text === p.font) { fi = i; break; } }
+        if (fi >= 0) { pal.fontDd.selection = pal.fontDd.items[fi]; refreshStyleDd(pal); }
+        var si = -1;
+        for (var k = 0; k < pal.styleDd.items.length; k++) { if (pal.styleDd.items[k].text === p.style) { si = k; break; } }
+        if (si >= 0) { pal.styleDd.selection = pal.styleDd.items[si]; }
+        pal.monoChk.value = p.mono;
+        pal.fontDd.enabled = !p.mono;
+        pal.styleDd.enabled = !p.mono;
+        if (p.align >= 0 && p.align < pal.alignDd.items.length) { pal.alignDd.selection = pal.alignDd.items[p.align]; }
+        if (p.ease >= 0 && p.ease < pal.easeDd.items.length) { pal.easeDd.selection = pal.easeDd.items[p.ease]; }
     }
-    function refreshPresetDd(pal) {
-        var names = getPresetNames();
-        pal.presetDd.removeAll();
-        pal.presetDd.add("item", "（当前参数）");
-        for (var i = 0; i < names.length; i++) { pal.presetDd.add("item", names[i]); }
-        pal.presetDd.selection = pal.presetDd.items[0];
+    // 按内存缓存更新「使用」按钮可用状态(空槽位禁用)
+    function updateSlotLoadBtns() {
+        if (!gSlotLoadBtns || !gSlotLoadBtns.length) { return; }
+        for (var i = 0; i < gSlotLoadBtns.length; i++) {
+            var sk = String(i + 1);
+            gSlotLoadBtns[i].enabled = !!presetsCache[sk];
+        }
     }
-    function savePreset(pal) {
+    // 存储: 当前面板参数 -> 槽位 idx(内存 + 写工程 JSON)
+    function saveSlot(pal, idx) {
         try {
             if (!getPresetFile()) {
                 setStatus(pal, "✗ 请先保存工程 (Ctrl/Cmd+S) 再保存预设", [0.9, 0.55, 0.1]);
                 return;
             }
-            var name = prompt("预设名称:", "预设1");
-            if (!name) { return; }
-            var base = {
-                start: parseFloat(pal.startInp.text) || 0,
-                target: parseFloat(pal.targetInp.text) || 0,
-                frames: parseInt(pal.framesInp.text, 10) || 30,
-                step: parseFloat(pal.stepInp.text) || 0,
-                dec: parseInt(pal.decInp.text, 10) || 0,
-                track: parseFloat(pal.trackInp.text) || 0,
-                font: pal.fontDd.selection ? pal.fontDd.selection.text : "（默认）",
-                style: pal.styleDd.selection ? pal.styleDd.selection.text : "常规",
-                align: pal.alignDd.selection ? pal.alignDd.selection.index : 1,
-                ease: pal.easeDd.selection ? pal.easeDd.selection.index : 0,
-                mono: pal.monoChk.value
-            };
-            var o = serializePreset(base);
-            o.name = sanitizePresetName(name);
-            var arr = readPresets();
-            var replaced = false;
-            for (var i = 0; i < arr.length; i++) {
-                if (arr[i] && arr[i].name === o.name) { arr[i] = o; replaced = true; break; }
-            }
-            if (!replaced) { arr.push(o); }
-            if (writePresets(arr)) {
-                refreshPresetDd(pal);
-                for (var j = 0; j < pal.presetDd.items.length; j++) {
-                    if (pal.presetDd.items[j].text === o.name) { pal.presetDd.selection = pal.presetDd.items[j]; break; }
-                }
-                setStatus(pal, "✓ 已保存预设: " + o.name + " → 工程目录 NumCounter.presets.json", [0.1, 0.75, 0.35]);
+            presetsCache[String(idx)] = collectParams(pal);
+            if (writeSlotsToStorage()) {
+                updateSlotLoadBtns();
+                setStatus(pal, "✓ 已存储到预设槽 " + idx + " → 工程目录 NumCounter.presets.json", [0.1, 0.75, 0.35]);
             } else {
                 setStatus(pal, "✗ 写入预设文件失败(请开启『允许脚本写入文件』)", [0.9, 0.25, 0.2]);
             }
@@ -707,60 +763,70 @@
             showDebugError(e);
         }
     }
-    function loadPreset(pal) {
+    // 使用: 槽位 idx -> 回填面板
+    function loadSlot(pal, idx) {
         try {
-            if (!getPresetFile()) {
-                setStatus(pal, "✗ 请先保存工程 (Ctrl/Cmd+S) 再读取预设", [0.9, 0.55, 0.1]);
-                return;
-            }
-            var sel = pal.presetDd.selection;
-            if (!sel || sel.text === "（当前参数）") { setStatus(pal, "请先在下拉选择已存预设", [0.85, 0.55, 0.1]); return; }
-            var name = sel.text;
-            var raw = findPreset(name);
-            if (raw === null) { setStatus(pal, "预设不存在: " + name, [0.9, 0.25, 0.2]); return; }
-            var o = deserializePreset(raw);
-            pal.startInp.text = String(o.start);
-            pal.targetInp.text = String(o.target);
-            pal.framesInp.text = String(o.frames);
-            pal.stepInp.text = String(o.step);
-            pal.decInp.text = String(o.dec);
-            pal.trackInp.text = String(o.track);
-            var fi = -1;
-            for (var i = 0; i < pal.fontDd.items.length; i++) { if (pal.fontDd.items[i].text === o.font) { fi = i; break; } }
-            if (fi >= 0) { pal.fontDd.selection = pal.fontDd.items[fi]; refreshStyleDd(pal); }
-            var si = -1;
-            for (var k = 0; k < pal.styleDd.items.length; k++) { if (pal.styleDd.items[k].text === o.style) { si = k; break; } }
-            if (si >= 0) { pal.styleDd.selection = pal.styleDd.items[si]; }
-            pal.monoChk.value = o.mono;
-            pal.fontDd.enabled = !o.mono;
-            pal.styleDd.enabled = !o.mono;
-            if (o.align >= 0 && o.align < pal.alignDd.items.length) { pal.alignDd.selection = pal.alignDd.items[o.align]; }
-            if (o.ease >= 0 && o.ease < pal.easeDd.items.length) { pal.easeDd.selection = pal.easeDd.items[o.ease]; }
-            setStatus(pal, "✓ 已应用预设: " + name, [0.1, 0.75, 0.35]);
+            var p = presetsCache[String(idx)];
+            if (!p) { setStatus(pal, "预设槽 " + idx + " 为空(先点「存储」)", [0.85, 0.55, 0.1]); return; }
+            applyParamsToUI(pal, p);
+            setStatus(pal, "✓ 已应用预设槽 " + idx, [0.1, 0.75, 0.35]);
         } catch (e) {
             setStatus(pal, "✗ 应用预设失败: " + e.toString(), [0.9, 0.25, 0.2]);
             showDebugError(e);
         }
     }
-    function deletePreset(pal) {
+    // 清空全部 4 槽位
+    function clearAllSlots(pal) {
         try {
-            if (!getPresetFile()) {
-                setStatus(pal, "✗ 请先保存工程 (Ctrl/Cmd+S)", [0.9, 0.55, 0.1]); return;
-            }
-            var sel = pal.presetDd.selection;
-            if (!sel || sel.text === "（当前参数）") { setStatus(pal, "请先选择要删除的预设", [0.85, 0.55, 0.1]); return; }
-            var name = sel.text;
-            var arr = readPresets();
-            var out = [];
-            for (var i = 0; i < arr.length; i++) { if (!(arr[i] && arr[i].name === name)) { out.push(arr[i]); } }
-            if (writePresets(out)) {
-                refreshPresetDd(pal);
-                setStatus(pal, "✓ 已删除预设: " + name, [0.6, 0.6, 0.6]);
+            presetsCache = { "1": null, "2": null, "3": null, "4": null };
+            if (writeSlotsToStorage()) {
+                updateSlotLoadBtns();
+                setStatus(pal, "✓ 已清空全部预设槽", [0.6, 0.6, 0.6]);
             } else {
                 setStatus(pal, "✗ 写入预设文件失败", [0.9, 0.25, 0.2]);
             }
         } catch (e) {
-            setStatus(pal, "✗ 删除预设失败: " + e.toString(), [0.9, 0.25, 0.2]);
+            setStatus(pal, "✗ 清空失败: " + e.toString(), [0.9, 0.25, 0.2]);
+            showDebugError(e);
+        }
+    }
+    // 导出预设: 另存独立 .json(跨工程复用)
+    function exportSlots(pal) {
+        try {
+            if (!getPresetFile()) { setStatus(pal, "✗ 请先保存工程再导出", [0.9, 0.55, 0.1]); return; }
+            var f = File.saveDialog("导出预设槽", "JSON:*.json", "NumCounter.presets.json");
+            if (!f) { return; }
+            f.encoding = "UTF-8";
+            if (!f.open("w")) { setStatus(pal, "✗ 导出失败", [0.9, 0.25, 0.2]); return; }
+            f.write(slotsToJson(presetsCache));
+            f.close();
+            setStatus(pal, "✓ 已导出预设槽 → " + f.fsName, [0.1, 0.75, 0.35]);
+        } catch (e) {
+            setStatus(pal, "✗ 导出失败: " + e.toString(), [0.9, 0.25, 0.2]);
+            showDebugError(e);
+        }
+    }
+    // 导入预设: 选 .json 合并进当前槽位(同名覆盖)
+    function importSlots(pal) {
+        try {
+            var f = File.openDialog("导入预设槽", "JSON:*.json");
+            if (!f) { return; }
+            f.encoding = "UTF-8";
+            if (!f.open("r")) { setStatus(pal, "✗ 读取失败", [0.9, 0.25, 0.2]); return; }
+            var txt = String(f.read());
+            f.close();
+            if (txt.charCodeAt(0) === 0xFEFF) { txt = txt.substring(1); }
+            var data = jsonParseSlots(txt);
+            var n = 0;
+            for (var k = 1; k <= SLOT_COUNT; k++) {
+                var sk = String(k);
+                if (data.slots[sk]) { presetsCache[sk] = data.slots[sk]; n++; }
+            }
+            writeSlotsToStorage();
+            updateSlotLoadBtns();
+            setStatus(pal, "✓ 已导入 " + n + " 个预设槽", [0.1, 0.75, 0.35]);
+        } catch (e) {
+            setStatus(pal, "✗ 导入失败: " + e.toString(), [0.9, 0.25, 0.2]);
             showDebugError(e);
         }
     }
@@ -864,24 +930,42 @@
     pal.easeDd = rf2.add("dropdownlist", undefined, ["线性", "缓入", "缓出", "缓入缓出"]);
     pal.easeDd.selection = pal.easeDd.items[0];
 
-    // 预设区 (存于工程目录文件)
-    var pPreset = pal.add("panel", undefined, "预设");
+    // 预设槽位(对齐仓库 AE-Lyrics-Animator 等「预设槽」实践: 固定 4 槽位 + 工程目录 JSON)
+    var pPreset = pal.add("panel", undefined, "预设槽位");
     pPreset.orientation = "column";
     pPreset.alignChildren = "fill";
     pPreset.spacing = 6;
-    var pr1 = pPreset.add("group"); pr1.orientation = "row"; pr1.alignChildren = "center";
-    pr1.add("statictext", undefined, "预设:");
-    pal.presetDd = pr1.add("dropdownlist", undefined, ["（当前参数）"]);
-    pal.presetDd.selection = pal.presetDd.items[0];
-    pal.presetDd.preferredSize.width = 150;
-    var pr2 = pPreset.add("group"); pr2.orientation = "row"; pr2.alignment = "center"; pr2.spacing = 8;
-    var btnSave = pr2.add("button", undefined, "保存预设");
-    var btnLoad = pr2.add("button", undefined, "应用预设");
-    var btnDel = pr2.add("button", undefined, "删除预设");
-    btnSave.onClick = function () { savePreset(pal); };
-    btnLoad.onClick = function () { loadPreset(pal); };
-    btnDel.onClick = function () { deletePreset(pal); };
-    refreshPresetDd(pal); // 填充已存预设
+    // 存储行: 1-4
+    var prSave = pPreset.add("group"); prSave.orientation = "row"; prSave.alignChildren = "center"; prSave.spacing = 2;
+    prSave.add("statictext", undefined, "存储预设:");
+    for (var si = 0; si < SLOT_COUNT; si++) {
+        (function(idx) {
+            var b = prSave.add("button", undefined, String(idx + 1));
+            b.preferredSize = [26, 22];
+            b.onClick = function () { saveSlot(pal, idx); };
+        })(si);
+    }
+    // 使用行: 1-4(空槽位禁用, 启动后由 loadSlotsFromStorage 更新)
+    var prLoad = pPreset.add("group"); prLoad.orientation = "row"; prLoad.alignChildren = "center"; prLoad.spacing = 2;
+    prLoad.add("statictext", undefined, "使用预设:");
+    for (var li = 0; li < SLOT_COUNT; li++) {
+        (function(idx) {
+            var b = prLoad.add("button", undefined, String(idx + 1));
+            b.preferredSize = [26, 22];
+            b.enabled = false;
+            gSlotLoadBtns.push(b);
+            b.onClick = function () { loadSlot(pal, idx); };
+        })(li);
+    }
+    // 工具行: 清空 / 导出 / 导入
+    var prTool = pPreset.add("group"); prTool.orientation = "row"; prTool.alignment = "center"; prTool.spacing = 6;
+    var btnClear = prTool.add("button", undefined, "清空全部");
+    var btnExport = prTool.add("button", undefined, "导出预设…");
+    var btnImport = prTool.add("button", undefined, "导入预设…");
+    btnClear.onClick = function () { clearAllSlots(pal); };
+    btnExport.onClick = function () { exportSlots(pal); };
+    btnImport.onClick = function () { importSlots(pal); };
+    loadSlotsFromStorage(); // 启动恢复槽位 + 更新「使用」按钮可用状态
 
     // 按钮
     var btnRow = pal.add("group");
