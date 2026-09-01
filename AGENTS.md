@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**：2026-09-01（commit `6898eba`）NumCounter v0.2.6（修复「数字始终不动」真正根因：`setValueAtTime` 签名实为 `(time, newValue)`，此前把值误当时间致关键帧错放 100s；改 `addKey+setValueAtKey` 并加 `numKeys/valueAtTime` 验证；预设升级为真正 JSON `NumCounter.presets.json`），根文档同步（四件套保持）
+> 📌 **文档基线**：2026-09-01（commit `404caeb`）NumCounter v0.2.7（预设改为「4 槽位」模式，对齐仓库 AE-Lyrics-Animator 等「预设槽」实践：固定 4 槽位 + `presetsCache` 内存缓存 + 工程目录 `NumCounter.presets.json` 单层持久化（`{version, slots}` 结构，手写 `slotsToJson` 构造 + 受控 `jsonParseSlots` 解析，避开会崩的 `app.settings`）；参数 `collectParams`/`applyParamsToUI` 复用 `serializePreset`/`deserializePreset`），根文档同步（四件套保持）
 > **更新文档/代码后，请更新此行**（日期 + 新 commit hash），并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
