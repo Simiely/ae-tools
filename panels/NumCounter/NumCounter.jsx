@@ -1,12 +1,16 @@
 ﻿// ============================================================
 // NumCounter · 数字计数器面板 (ScriptUI Panel, ExtendScript ES3)
 //
-// Version: 0.2.5
+// Version: 0.2.6
 // Description: 一键生成「数字从起始值递增到目标值」的动画。
 //   支持步进、小数位、字间距、字体(家庭+字重)、等宽锁定、对齐、缓动。
 //   动画由「数值」滑块关键帧驱动 + 每位独立文本图层的 sourceText 表达式实时格式化。
 //   生成后仍可拖「数值」滑块关键帧调节奏, 改小数位/步进滑块即时变, 无需重跑脚本。
-//   预设: 存为工程所在目录的 NumCounter.presets 文件(保存/应用/删除), 跟随工程走。
+//   预设: 存为工程所在目录的 NumCounter.presets.json(标准 JSON 数组, 保存/应用/删除), 跟随工程走。
+//
+// 2026-09-01 v0.2.6 关键修复: 此前 setValueAtTime(startVal, t0) 把「值」传到了「时间」参数,
+//   关键帧被错放到 100 秒处, 可见播放区间内数值恒≈0 => 数字不动。改为无歧义的
+//   addKey + setValueAtKey, 并加数据层验证(numKeys 与 valueAtTime)。预设文件升级为真正 JSON。
 //
 // 安装: 放到 %APPDATA%\Adobe\After Effects\<ver>\Scripts\ScriptUI Panels\
 //       (本仓库用 python install.py 统一部署)
@@ -58,50 +62,106 @@
         return pre + s + suf;
     }
 
-    // 预设序列化 / 反序列化 (纯函数, node 可测; ES3 无 JSON, 用 key=value& 格式)
+    // 预设序列化 / 反序列化 (纯函数, node 可测)
+    // 返回/接收「标准预设对象」(所有字段归一化); 文件层再写成 JSON 数组。
     function serializePreset(o) {
-        function kv(k, v) { return k + "=" + String(v); }
-        return [kv("start", o.start), kv("target", o.target), kv("frames", o.frames),
-            kv("step", o.step), kv("dec", o.dec), kv("track", o.track),
-            kv("font", o.font), kv("style", o.style), kv("align", o.align),
-            kv("ease", o.ease), kv("mono", o.mono ? "true" : "false")].join("&");
+        return {
+            start: (o && o.start != null) ? parseFloat(o.start) : 0,
+            target: (o && o.target != null) ? parseFloat(o.target) : 0,
+            frames: (o && o.frames != null) ? parseInt(o.frames, 10) : 30,
+            step: (o && o.step != null) ? parseFloat(o.step) : 0,
+            dec: (o && o.dec != null) ? parseInt(o.dec, 10) : 0,
+            track: (o && o.track != null) ? parseFloat(o.track) : 0,
+            font: (o && o.font != null) ? String(o.font) : "（默认）",
+            style: (o && o.style != null) ? String(o.style) : "常规",
+            align: (o && o.align != null) ? parseInt(o.align, 10) : 1,
+            ease: (o && o.ease != null) ? parseInt(o.ease, 10) : 0,
+            mono: !!(o && o.mono)
+        };
     }
-    function deserializePreset(s) {
+    function deserializePreset(src) {
         var o = { start: 0, target: 100, frames: 30, step: 1, dec: 0, track: 0,
             font: "（默认）", style: "常规", align: 1, ease: 0, mono: true };
-        if (!s) { return o; }
-        var parts = s.split("&");
-        for (var i = 0; i < parts.length; i++) {
-            var kv = parts[i].split("=");
-            if (kv.length < 2) { continue; }
-            var k = kv[0]; var v = kv[1];
-            if (k === "start") { o.start = parseFloat(v); }
-            else if (k === "target") { o.target = parseFloat(v); }
-            else if (k === "frames") { o.frames = parseInt(v, 10); }
-            else if (k === "step") { o.step = parseFloat(v); }
-            else if (k === "dec") { o.dec = parseInt(v, 10); }
-            else if (k === "track") { o.track = parseFloat(v); }
-            else if (k === "font") { o.font = v; }
-            else if (k === "style") { o.style = v; }
-            else if (k === "align") { o.align = parseInt(v, 10); }
-            else if (k === "ease") { o.ease = parseInt(v, 10); }
-            else if (k === "mono") { o.mono = (v === "true"); }
+        if (!src) { return o; }
+        // 兼容旧 key=value& 字符串(ES3 无 JSON.parse)
+        if (typeof src === "string") {
+            var parts = src.split("&");
+            for (var i = 0; i < parts.length; i++) {
+                var kv = parts[i].split("=");
+                if (kv.length < 2) { continue; }
+                var k = kv[0]; var v = kv[1];
+                if (k === "start") { o.start = parseFloat(v); }
+                else if (k === "target") { o.target = parseFloat(v); }
+                else if (k === "frames") { o.frames = parseInt(v, 10); }
+                else if (k === "step") { o.step = parseFloat(v); }
+                else if (k === "dec") { o.dec = parseInt(v, 10); }
+                else if (k === "track") { o.track = parseFloat(v); }
+                else if (k === "font") { o.font = v; }
+                else if (k === "style") { o.style = v; }
+                else if (k === "align") { o.align = parseInt(v, 10); }
+                else if (k === "ease") { o.ease = parseInt(v, 10); }
+                else if (k === "mono") { o.mono = (v === "true"); }
+            }
+            return o;
         }
+        // 对象(来自 JSON 数组): 按字段归一化
+        if (src.start != null) { o.start = parseFloat(src.start); }
+        if (src.target != null) { o.target = parseFloat(src.target); }
+        if (src.frames != null) { o.frames = parseInt(src.frames, 10); }
+        if (src.step != null) { o.step = parseFloat(src.step); }
+        if (src.dec != null) { o.dec = parseInt(src.dec, 10); }
+        if (src.track != null) { o.track = parseFloat(src.track); }
+        if (src.font != null) { o.font = String(src.font); }
+        if (src.style != null) { o.style = String(src.style); }
+        if (src.align != null) { o.align = parseInt(src.align, 10); }
+        if (src.ease != null) { o.ease = parseInt(src.ease, 10); }
+        if (src.mono != null) { o.mono = !!src.mono; }
         return o;
     }
 
-    // 预设名/行的纯函数(可测): 一行 = name|序列化串; name 禁 | 和换行
+    // 预设名纯函数(可测): name 禁 | 和换行(避免破坏 JSON / 行结构); 用 split/join 避开正则
     function sanitizePresetName(name) {
-        return String(name).replace(/[\|\r\n]+/g, "_");
+        var s = String(name);
+        s = s.split("|").join("_");
+        s = s.split("\r").join("_");
+        s = s.split("\n").join("_");
+        return s;
     }
-    function formatPresetLine(name, serialized) {
-        return sanitizePresetName(name) + "|" + serialized;
+
+    // 手写 JSON 值转义(ES3 禁用 JSON.stringify)。仅处理字符串中的 " 与 \。
+    function jsonEscape(s) {
+        s = String(s);
+        s = s.split("\\").join("\\\\");
+        s = s.split('"').join('\\"');
+        return s;
     }
-    function parsePresetLine(line) {
-        if (!line) { return null; }
-        var idx = line.indexOf("|");
-        if (idx < 0) { return null; }
-        return { name: line.substring(0, idx), serialized: line.substring(idx + 1) };
+    // 将预设对象数组写成标准 JSON 数组字符串(便于人工查看/编辑)
+    function presetsToJson(arr) {
+        var out = "[\n";
+        for (var i = 0; i < arr.length; i++) {
+            var o = arr[i];
+            out += '  {"name":"' + jsonEscape(o.name) + '",'
+                + '"start":' + (o.start != null ? o.start : 0) + ','
+                + '"target":' + (o.target != null ? o.target : 0) + ','
+                + '"frames":' + (o.frames != null ? o.frames : 30) + ','
+                + '"step":' + (o.step != null ? o.step : 0) + ','
+                + '"dec":' + (o.dec != null ? o.dec : 0) + ','
+                + '"track":' + (o.track != null ? o.track : 0) + ','
+                + '"font":"' + jsonEscape(o.font != null ? o.font : "（默认）") + '",'
+                + '"style":"' + jsonEscape(o.style != null ? o.style : "常规") + '",'
+                + '"align":' + (o.align != null ? o.align : 1) + ','
+                + '"ease":' + (o.ease != null ? o.ease : 0) + ','
+                + '"mono":' + (o.mono ? "true" : "false") + '}'
+                + (i < arr.length - 1 ? ",\n" : "\n");
+        }
+        out += "]";
+        return out;
+    }
+    // 读取标准 JSON 数组(ES3 禁用 JSON.parse; 文件为本脚本自生成的可信预设,
+    //   仅当首字符为 [ 时才解析, 防止误读非本插件文件)
+    function jsonParseArray(str) {
+        if (!str || str.charAt(0) !== "[") { return []; }
+        try { return eval("(" + str + ")"); } catch (e) { return []; }
     }
 
     // node 测试导出: 在 AE 之外(app 未定义)只导出纯函数并返回, 跳过 UI 代码
@@ -110,8 +170,8 @@
             module.exports = {
                 snapToStep: snapToStep, formatNumber: formatNumber,
                 serializePreset: serializePreset, deserializePreset: deserializePreset,
-                sanitizePresetName: sanitizePresetName, formatPresetLine: formatPresetLine,
-                parsePresetLine: parsePresetLine
+                sanitizePresetName: sanitizePresetName,
+                jsonEscape: jsonEscape, presetsToJson: presetsToJson, jsonParseArray: jsonParseArray
             };
         }
         return;
@@ -122,7 +182,7 @@
     // ============================================================
 
     var CTRL_NAME = "NumCounter 控制"; // 控制空对象名(数值/步进/小数位滑块)
-    var PRESET_FILE_NAME = "NumCounter.presets"; // 预设文件: 存于工程所在目录
+    var PRESET_FILE_NAME = "NumCounter.presets.json"; // 预设文件: 标准 JSON 数组, 存于工程所在目录
 
     // ---- 调试诊断缓冲: 每次生成清空前次, 失败时把详情显示给用户 ----
     var gDiag = [];
@@ -475,12 +535,28 @@
             var t0 = comp.time;
             if (t0 + fd > comp.duration) { t0 = 0; }
             var t1 = t0 + fd;
-            valProp.setValueAtTime(startVal, t0);
-            valProp.setValueAtTime(targetVal, t1);
+            // 根因修复(证据: Adobe 官方 Property 文档 + AE 标准手册示例):
+            //   setValueAtTime 签名 = (time, newValue), 时间在前、值在后。
+            //   此前写成 setValueAtTime(startVal, t0) 把「值」误当「时间」, 关键帧被错放到
+            //   time=100s 处, 可见播放区间(0~1s)内数值恒≈0 => 数字不动。
+            //   改用无歧义的 addKey + setValueAtKey, 并做数据层验证。
+            var k1 = valProp.addKey(t0); valProp.setValueAtKey(k1, startVal);
+            var k2 = valProp.addKey(t1); valProp.setValueAtKey(k2, targetVal);
             stepProp.setValue(step);
             decProp.setValue(dec);
             applyEasing(valProp, ease);
-            diag("滑块关键帧设置 OK (数值 " + startVal + "->" + targetVal + ")");
+            diag("滑块关键帧设置 OK (数值 " + startVal + "->" + targetVal + " @ " + t0.toFixed(3) + "→" + t1.toFixed(3) + "s)");
+            // 数据层验证: 确认关键帧已建立, 且数值确实随时间从 startVal 变到 targetVal
+            var vk1 = (valProp.numKeys >= 1) ? valProp.valueAtTime(t0, false) : NaN;
+            var vk2 = (valProp.numKeys >= 2) ? valProp.valueAtTime(t1, false) : NaN;
+            diag("关键帧验证: numKeys=" + valProp.numKeys + " | t0值=" + vk1 + " | t1值=" + vk2);
+            if (valProp.numKeys < 2) {
+                setStatus(pal, "✗ 关键帧未建立(numKeys=" + valProp.numKeys + "), 数字不会动", [0.9, 0.25, 0.2]);
+                diag("!! 关键帧缺失: 数值滑块无关键帧 => 计数不动");
+                flushDiag(pal);
+                app.endUndoGroup();
+                return;
+            }
 
             // 关键修复(证据: Adobe HelpX「表达式错误」+ CSDN AE 社区高采纳):
             // 控制空对象(Null)本身不渲染任何像素, 无需禁用; 一旦 enabled=false,
@@ -532,7 +608,7 @@
         }
     }
 
-    // ---- 预设: 存为工程所在目录下的 NumCounter.presets 文件 ----
+    // ---- 预设: 存为工程所在目录下的 NumCounter.presets.json(标准 JSON 数组) ----
     // 取预设文件对象; 工程未保存时返回 null(需在 UI 层提示先保存工程)
     function getPresetFile() {
         try {
@@ -542,51 +618,43 @@
             return new File(folder.fsName + "/" + PRESET_FILE_NAME);
         } catch (e) { return null; }
     }
-    function readPresetLines() {
+    // 读取预设数组(本插件写出的标准 JSON 数组; ES3 禁用 JSON.parse, 用受控 eval)
+    function readPresets() {
         var f = getPresetFile();
-        var lines = [];
         if (f && f.exists) {
             try {
                 f.encoding = "UTF-8";
                 if (f.open("r")) {
                     var txt = String(f.read());
                     f.close();
-                    var arr = txt.split("\n");
-                    for (var i = 0; i < arr.length; i++) {
-                        var ln = arr[i].replace(/\r$/, "");
-                        if (ln.length) { lines.push(ln); }
-                    }
+                    if (txt.charCodeAt(0) === 0xFEFF) { txt = txt.substring(1); } // 去 BOM
+                    var arr = jsonParseArray(txt);
+                    if (arr && arr.length) { return arr; }
                 }
             } catch (e) { try { f.close(); } catch (e2) {} }
         }
-        return lines;
+        return [];
     }
-    function writePresetLines(lines) {
+    function writePresets(arr) {
         var f = getPresetFile();
         if (!f) { return false; }
         try {
             f.encoding = "UTF-8";
             if (!f.open("w")) { return false; }
-            for (var i = 0; i < lines.length; i++) { f.writeln(lines[i]); }
+            f.write(presetsToJson(arr));
             f.close();
             return true;
         } catch (e) { try { f.close(); } catch (e2) {} return false; }
     }
     function getPresetNames() {
-        var lines = readPresetLines();
+        var arr = readPresets();
         var names = [];
-        for (var i = 0; i < lines.length; i++) {
-            var p = parsePresetLine(lines[i]);
-            if (p) { names.push(p.name); }
-        }
+        for (var i = 0; i < arr.length; i++) { if (arr[i] && arr[i].name) { names.push(arr[i].name); } }
         return names;
     }
-    function findPresetSerialized(name) {
-        var lines = readPresetLines();
-        for (var i = 0; i < lines.length; i++) {
-            var p = parsePresetLine(lines[i]);
-            if (p && p.name === name) { return p.serialized; }
-        }
+    function findPreset(name) {
+        var arr = readPresets();
+        for (var i = 0; i < arr.length; i++) { if (arr[i] && arr[i].name === name) { return arr[i]; } }
         return null;
     }
     function refreshPresetDd(pal) {
@@ -604,7 +672,7 @@
             }
             var name = prompt("预设名称:", "预设1");
             if (!name) { return; }
-            var o = {
+            var base = {
                 start: parseFloat(pal.startInp.text) || 0,
                 target: parseFloat(pal.targetInp.text) || 0,
                 frames: parseInt(pal.framesInp.text, 10) || 30,
@@ -617,23 +685,20 @@
                 ease: pal.easeDd.selection ? pal.easeDd.selection.index : 0,
                 mono: pal.monoChk.value
             };
-            var s = serializePreset(o);
-            var sName = sanitizePresetName(name);
-            var lines = readPresetLines();
+            var o = serializePreset(base);
+            o.name = sanitizePresetName(name);
+            var arr = readPresets();
             var replaced = false;
-            var out = [];
-            for (var i = 0; i < lines.length; i++) {
-                var p = parsePresetLine(lines[i]);
-                if (p && p.name === sName) { out.push(formatPresetLine(sName, s)); replaced = true; }
-                else { out.push(lines[i]); }
+            for (var i = 0; i < arr.length; i++) {
+                if (arr[i] && arr[i].name === o.name) { arr[i] = o; replaced = true; break; }
             }
-            if (!replaced) { out.push(formatPresetLine(sName, s)); }
-            if (writePresetLines(out)) {
+            if (!replaced) { arr.push(o); }
+            if (writePresets(arr)) {
                 refreshPresetDd(pal);
                 for (var j = 0; j < pal.presetDd.items.length; j++) {
-                    if (pal.presetDd.items[j].text === sName) { pal.presetDd.selection = pal.presetDd.items[j]; break; }
+                    if (pal.presetDd.items[j].text === o.name) { pal.presetDd.selection = pal.presetDd.items[j]; break; }
                 }
-                setStatus(pal, "✓ 已保存预设: " + sName + " → 工程目录 NumCounter.presets", [0.1, 0.75, 0.35]);
+                setStatus(pal, "✓ 已保存预设: " + o.name + " → 工程目录 NumCounter.presets.json", [0.1, 0.75, 0.35]);
             } else {
                 setStatus(pal, "✗ 写入预设文件失败(请开启『允许脚本写入文件』)", [0.9, 0.25, 0.2]);
             }
@@ -651,9 +716,9 @@
             var sel = pal.presetDd.selection;
             if (!sel || sel.text === "（当前参数）") { setStatus(pal, "请先在下拉选择已存预设", [0.85, 0.55, 0.1]); return; }
             var name = sel.text;
-            var s = findPresetSerialized(name);
-            if (s === null) { setStatus(pal, "预设不存在: " + name, [0.9, 0.25, 0.2]); return; }
-            var o = deserializePreset(s);
+            var raw = findPreset(name);
+            if (raw === null) { setStatus(pal, "预设不存在: " + name, [0.9, 0.25, 0.2]); return; }
+            var o = deserializePreset(raw);
             pal.startInp.text = String(o.start);
             pal.targetInp.text = String(o.target);
             pal.framesInp.text = String(o.frames);
@@ -685,14 +750,10 @@
             var sel = pal.presetDd.selection;
             if (!sel || sel.text === "（当前参数）") { setStatus(pal, "请先选择要删除的预设", [0.85, 0.55, 0.1]); return; }
             var name = sel.text;
-            var lines = readPresetLines();
+            var arr = readPresets();
             var out = [];
-            for (var i = 0; i < lines.length; i++) {
-                var p = parsePresetLine(lines[i]);
-                if (p && p.name === name) { continue; }
-                out.push(lines[i]);
-            }
-            if (writePresetLines(out)) {
+            for (var i = 0; i < arr.length; i++) { if (!(arr[i] && arr[i].name === name)) { out.push(arr[i]); } }
+            if (writePresets(out)) {
                 refreshPresetDd(pal);
                 setStatus(pal, "✓ 已删除预设: " + name, [0.6, 0.6, 0.6]);
             } else {

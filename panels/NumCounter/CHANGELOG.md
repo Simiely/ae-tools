@@ -1,5 +1,19 @@
 # 更新日志（CHANGELOG）
 
+## v0.2.6（2026-09-01 修复「数字始终不动」的真正根因 + 预设升级为 JSON）
+
+- **现象**: v0.2.0–v0.2.5 全程「生成成功但数字不递增」; v0.2.4 把控制层改回 enabled=true 仍无效
+- **真正根因(经搜索权威确认, Adobe 官方 Property 文档 + AE 标准手册示例)**:
+  `Property.setValueAtTime` 签名 = **`(time, newValue)`(时间在前、值在后)**。本插件自 odometer 引入起一直写成
+  `valProp.setValueAtTime(startVal, t0)`, 把「值」误送到「时间」参数:
+  - `setValueAtTime(0, 0)` 碰巧对(时间0/值0)
+  - `setValueAtTime(100, 1.0)` 被解释成「时间=100 秒 / 值=1.0」→ 第二个关键帧落在 100 秒处
+  - 整个可见播放区间(0~1s)内数值恒≈0 ⇒ **数字根本不动**
+  - 这就是 v0.2.0 起「数字不动」的恒定主因; v0.2.4 的 `enabled=true` 只是排除了「禁用冻结」这个次要因素, 并未触及参数顺序
+- **修法**: 改用无歧义的 `addKey(t) + setValueAtKey(k, v)`(两者签名均为「时间/索引在前」, 与顺序无关); 并对数值滑块做**数据层验证** —— 生成后读 `numKeys` 与 `valueAtTime(t0)/valueAtTime(t1)`, 确认关键帧数=2 且 t0→t1 数值确实从 startVal 变到 targetVal; 若 numKeys<2 直接报错提示而非静默生成
+- **预设文件升级为真正 JSON**: `NumCounter.presets`(每行 `name|序列化串`) → **`NumCounter.presets.json`(标准 JSON 数组)**, 便于人工查看/编辑。因仓库规范 ES3 禁用 `JSON.parse/stringify`, 写入用手写 `presetsToJson` 构造、读取用受控 `jsonParseArray`(仅当首字符为 `[` 时 `eval`, 文件为本脚本自生成的可信预设); 旧 `key=value&` 字符串仍可被 `deserializePreset` 兼容读取
+- 面板 CHANGELOG v0.2.6 / 根 CHANGELOG v1.3.8
+
 ## v0.2.5（2026-09-01 修复「保存预设报错」+ 预设改为工程目录文件）
 
 - **现象**: 保存预设报 `Error: After Effects错误: 由于参数 4，无法调用"saveSetting"。user 不是无符号整数。`（第 555 行附近）
