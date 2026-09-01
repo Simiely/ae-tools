@@ -32,7 +32,7 @@ ae-tools/
 | 音频缩放 AudioScale | `panels/AudioScale/` | 面板 | Window > Extensions | 稳定 | Simiely/AudioScale |
 | 星空生成器 starry-sky-generator | `panels/starry-sky-generator/` | 面板 | Window > Extensions | 稳定 | Simiely/starry-sky-generator |
 | 快速K帧 QuickKey | `panels/QuickKey/` | 面板 | Window > Extensions | 开发中（v0.3.6，内置 cubic 预设） | 新插件（本仓库首发） |
-| 数字计数器 NumCounter | `panels/NumCounter/` | 面板 | Window > Extensions | 开发中（v0.1.0，表达式滑块驱动 + 抖动修复） | 新插件（本仓库首发） |
+| 数字计数器 NumCounter | `panels/NumCounter/` | 面板 | Window > Extensions | 开发中（v0.2.0，独立数位/odometer + 字体字重两级联动，任意字体零抖动） | 新插件（本仓库首发） |
 
 ### 待开发（WIP，暂不部署）
 

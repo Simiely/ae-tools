@@ -1,5 +1,15 @@
 # 更新日志（CHANGELOG）
 
+## v0.2.0（2026-09-01 架构升级）
+
+- **架构改为「独立数位 / odometer」**:每次生成把每一位拆成固定槽位的独立文本图层,由共享「数值」滑块(控制空对象 `NumCounter 控制`)驱动,每位表达式只截取自己那一位字符
+- **效果**:任意比例字体(含思源黑体/Arial 等)计数也零抖动——每位待在自己槽里,邻居不动;不再依赖等宽字体
+- **字体 + 字重两级联动**:基于 `app.fonts.allFonts` 枚举家庭名,选家庭后重建字重下拉(Regular/Bold/Italic...),写入 PostScript 名(含字重)
+- **移除前后缀**:按用户要求不做进面板(可另行手动加图层);纯函数 `formatNumber` 仍保留 pre/suf 参数兼容
+- **字距更名为「字间距(px)」**:在数位模式下作槽位间额外间距;数位图层 tracking 置 0(单字符无意义)
+- 离线验证:node 模拟数位截取(右对齐/符号/小数/步进吸附)8 例全部符合预期
+- ES3 语法 `node --check` + 19 项纯逻辑断言通过;雷区(保留字属性/正则`\\`/const/let/箭头)扫描无
+
 ## v0.1.1（2026-09-01 真机修复）
 
 - **修复**:`doc.justification` 在 AE 2026 报错「无法设置 justification,值未定义」—— 根因是 `ParagraphJustification` 成员名已从 `LEFT/CENTER/RIGHT` 改为 `LEFT_JUSTIFY/CENTER_JUSTIFY/RIGHT_JUSTIFY`。改用 `getJustification()` 兼容两种命名,取不到则跳过(不再崩溃)

@@ -1,20 +1,21 @@
 ﻿// ============================================================
 // NumCounter · 数字计数器面板 (ScriptUI Panel, ExtendScript ES3)
 //
-// Version: 0.1.0
+// Version: 0.2.0
 // Description: 一键生成「数字从起始值递增到目标值」的动画。
-//   支持步进、小数位、字距、对齐、等宽锁定、前缀/后缀、缓动。
-//   动画由「数值」滑块关键帧驱动 + sourceText 表达式实时格式化，
-//   生成后仍可拖滑块/关键帧调整，无需重跑脚本。
+//   支持步进、小数位、字间距、字体(家庭+字重)、等宽锁定、对齐、缓动。
+//   动画由「数值」滑块关键帧驱动 + 每位独立文本图层的 sourceText 表达式实时格式化。
+//   生成后仍可拖「数值」滑块关键帧调节奏, 改小数位/步进滑块即时变, 无需重跑脚本。
 //
 // 安装: 放到 %APPDATA%\Adobe\After Effects\<ver>\Scripts\ScriptUI Panels\
 //       (本仓库用 python install.py 统一部署)
 // 使用: 重启 AE -> 窗口 > 扩展 > NumCounter · 数字计数器
 //
-// 抖动根因与修复: 比例字体数字宽度不等(1 比 8 窄),位数变化/同位数内变化
-//   都会让文本宽度变 -> 左对齐整行右移、居中绕中心抖。
-//   修复: ① 等宽数字字体(等宽锁定) ② 对齐(右/中,增长只朝一个方向)
-//   ③ 固定位数(前导零,需配合等宽字体才彻底稳) ④ 字距作为统一加宽控制。
+// 抖动根因与修复(本版 = 独立数位 / odometer):
+//   比例字体数字宽度不等(1 比 8 窄), 单文本图层里位数变化会让整行伸缩 -> 抖动。
+//   本版把每一位拆成固定槽位的独立文本图层, 由共享「数值」滑块驱动,
+//   每位表达式只截取自己那一位的字符。每位待在自己槽里, 邻居不动 -> 任意字体零抖动。
+//   字体/字重通过 app.fonts.allFonts 枚举(家庭 -> 字重两级联动), 适配不同字体。
 // ============================================================
 
 (function (thisObj) {
@@ -31,7 +32,7 @@
     }
 
     // 格式化为带固定小数位的字符串, 支持前缀/后缀与负号
-    // dec: 小数位数(0~4); pre/suf: 前缀/后缀
+    // dec: 小数位数(0~4); pre/suf: 前缀/后缀(本版 UI 不暴露, 保留给表达式兼容)
     function formatNumber(v, dec, pre, suf) {
         pre = pre || "";
         suf = suf || "";
@@ -64,15 +65,20 @@
     // 以下为 AE 运行环境代码
     // ============================================================
 
-    // ---- 字体枚举: 从 app.fonts (AE 24.0+) 取系统字体做下拉 ----
-    // gFontList: 下拉项(家庭名, 含「(默认)」与等宽字体); gFontMap: 家庭名 -> PostScript 名
-    var gFontList = ["（默认）"];
+    var CTRL_NAME = "NumCounter 控制"; // 控制空对象名(数值/步进/小数位滑块)
+
+    // ---- 字体枚举: 从 app.fonts (AE 24.0+) 取系统字体做两级下拉 ----
+    // gFontFamilyList: 家庭名下拉项(含「(默认)」与等宽字体)
+    // gFontStyles: 家庭名 -> [{style: 字重名, ps: PostScript 名}] (按家庭内顺序)
+    // gFontMap: 家庭名 -> PostScript 名(兜底, 用于 Consolas/Courier New 等未进 allFonts 的)
+    var gFontFamilyList = ["（默认）"];
+    var gFontStyles = {};
     var gFontMap = {};
     function ensureMonoInList(name) {
-        for (var i = 0; i < gFontList.length; i++) {
-            if (gFontList[i] === name) { return; }
+        for (var i = 0; i < gFontFamilyList.length; i++) {
+            if (gFontFamilyList[i] === name) { return; }
         }
-        gFontList.push(name);
+        gFontFamilyList.push(name);
         gFontMap[name] = name;
     }
     function collectFonts() {
@@ -90,17 +96,22 @@
                 var fn = first.familyName;
                 if (seen[fn]) { continue; }
                 seen[fn] = true;
-                gFontList.push(fn);
+                gFontFamilyList.push(fn);
                 gFontMap[fn] = first.postScriptName || fn;
+                var styles = [];
+                for (var k = 0; k < arr.length; k++) {
+                    var fo = arr[k];
+                    if (!fo) { continue; }
+                    styles.push({ style: fo.styleName || "常规", ps: fo.postScriptName || fn });
+                }
+                gFontStyles[fn] = styles;
             }
-            // 确保常见等宽字体在列表里(未安装则跳过, 仍可用等宽锁定兜底)
             ensureMonoInList("Consolas");
             ensureMonoInList("Courier New");
         } catch (e) { /* 字体枚举失败则用默认列表(仅等宽) */ }
     }
 
     // ---- 对齐枚举兼容: AE 2026 成员名为 *_JUSTIFY, 旧版曾用 LEFT/CENTER/RIGHT ----
-    // align: 0 左 / 1 中 / 2 右; 返回 ParagraphJustification 枚举值, 取不到返回 undefined
     function getJustification(align) {
         try {
             var P = ParagraphJustification;
@@ -179,15 +190,15 @@
         try { pal.layout.resize(); } catch (e3) {}
     }
 
-    // ---- 构建 sourceText 表达式 (ES3, 与 formatNumber 逻辑一致) ----
-    // 引用效果按序号: effect(1)=数值, effect(2)=步进, effect(3)=小数位 (与添加顺序一致)
-    function buildExpr(pre, suf) {
-        var safePre = (pre || "").split('"').join('\\"');
-        var safeSuf = (suf || "").split('"').join('\\"');
+    // ---- 构建每位数位图层的 sourceText 表达式 (ES3, 与 formatNumber 逻辑一致) ----
+    // 引用控制层 CTRL_NAME 的效果: 数值 / 步进 / 小数位
+    // SLOT/SLOTCOUNT 为本层槽位索引与总槽数(生成时写死到表达式里)
+    function buildSlotExpr(slotIndex, slotCount, ctrlName) {
         return ""
-            + 'var val = effect(1)("滑块");\n'      // 数值: 当前数值
-            + 'var step = effect(2)("滑块");\n'     // 步进: 每次跳多少
-            + 'var dec = effect(3)("滑块");\n'      // 小数位
+            + 'var ctrl = thisComp.layer("' + ctrlName + '");\n'
+            + 'var val = ctrl("Effects")("数值")("滑块");\n'
+            + 'var step = ctrl("Effects")("步进")("滑块");\n'
+            + 'var dec = ctrl("Effects")("小数位")("滑块");\n'
             + 'if (step > 0) { val = Math.round(val / step) * step; }\n'
             + 'var f = 1; for (var i = 0; i < dec; i++) { f = f * 10; }\n'
             + 'val = Math.round(val * f) / f;\n'
@@ -195,12 +206,38 @@
             + 'var sc = Math.round(av * f); var s = String(sc);\n'
             + 'if (dec > 0) { while (s.length <= dec) { s = "0" + s; } var ip = s.substring(0, s.length - dec); var dp = s.substring(s.length - dec); s = ip + "." + dp; }\n'
             + 'if (neg && val !== 0) { s = "-" + s; }\n'
-            + 'var PRE = "' + safePre + '"; var SUF = "' + safeSuf + '";\n'
-            + 'PRE + s + SUF;\n';
+            + 'var SLOT = ' + slotIndex + '; var SLOTCOUNT = ' + slotCount + ';\n'
+            + 'var fr = SLOTCOUNT - 1 - SLOT; var ch = (fr >= 0 && fr < s.length) ? s.charAt(s.length - 1 - fr) : "";\n'
+            + 'ch;\n';
+    }
+
+    // ---- 计算总槽数(= 起始/目标格式化字符串的最大长度, 含符号与小数点) ----
+    function computeSlotCount(startVal, targetVal, dec) {
+        function fstr(v) {
+            var s = formatNumber(Math.abs(v), dec, "", "");
+            return (v < 0 ? "-" : "") + s;
+        }
+        var a = fstr(startVal);
+        var b = fstr(targetVal);
+        var n = Math.max(a.length, b.length);
+        return n > 0 ? n : 1;
+    }
+
+    // ---- 解析当前所选字体 -> PostScript 名(含字重) ----
+    function resolveFontPs(pal) {
+        if (pal.monoChk.value) { return "Consolas"; }
+        var fam = pal.fontDd.selection ? pal.fontDd.selection.text : "（默认）";
+        if (!fam || fam === "（默认）") { return ""; }
+        var styles = gFontStyles[fam];
+        if (styles && styles.length) {
+            var si = pal.styleDd.selection ? pal.styleDd.selection.index : 0;
+            if (si < 0 || si >= styles.length) { si = 0; }
+            return styles[si].ps || fam;
+        }
+        return gFontMap[fam] || fam; // 兜底
     }
 
     // ---- 缓动: 写「数值」滑块两帧的 temporal ease (失败不影响计数, 退化为线性) ----
-    // ease: 0 线性 / 1 缓入 / 2 缓出 / 3 缓入缓出
     function applyEasing(prop, ease) {
         if (!ease || ease === 0) { return; } // 线性: 保持默认
         try {
@@ -229,7 +266,7 @@
         } catch (e) { /* 缓动失败退化为线性, 计数动画照常 */ }
     }
 
-    // ---- 主生成逻辑 ----
+    // ---- 主生成逻辑: 始终拆成每位数位图层 + 控制空对象 ----
     function buildCounter(pal) {
         var comp = null;
         try {
@@ -252,70 +289,74 @@
             var dec = parseInt(pal.decInp.text, 10);
             if (isNaN(dec) || dec < 0) { dec = 0; }
             if (dec > 4) { dec = 4; }
-            var tracking = parseFloat(pal.trackInp.text);
+            var tracking = parseFloat(pal.trackInp.text); // 本版 = 槽位间额外间距(px)
             if (isNaN(tracking)) { tracking = 0; }
-            var fontSel = pal.fontDd.selection ? pal.fontDd.selection.text : "（默认）";
-            var font = (fontSel && fontSel !== "（默认）") ? fontSel : "";
             var mono = pal.monoChk.value;
             var align = pal.alignDd.selection ? pal.alignDd.selection.index : 1; // 0左 1中 2右
-            var pre = pal.preInp.text;
-            var suf = pal.sufInp.text;
             var ease = pal.easeDd.selection ? pal.easeDd.selection.index : 0;     // 0线性 1入 2出 3入出
+            var ps = resolveFontPs(pal);
 
-            // 新建文本图层
-            var tl = comp.layers.addText("0");
-            tl.name = "数字计数器 " + startVal + "→" + targetVal;
+            var fontSize = 120;
+            var slotCount = computeSlotCount(startVal, targetVal, dec);
+            var slotW = fontSize * 0.6 + tracking; // 槽位间距(px)
+            var totalW = slotCount * slotW;
+            var blockLeft;
+            if (align === 0) { blockLeft = 0; }
+            else if (align === 2) { blockLeft = comp.width - totalW; }
+            else { blockLeft = (comp.width - totalW) / 2; }
+            var cy = comp.height / 2;
 
-            // 文本文档属性: 字体 / 字号 / 字距 / 对齐 / 颜色
-            var doc = tl.sourceText.value;
-            doc.fillColor = [1, 1, 1];
-            doc.fontSize = 120;
-            try {
-                if (mono) {
-                    doc.font = "Consolas";
-                } else if (font && gFontMap[font]) {
-                    doc.font = gFontMap[font]; // 选中的字体家庭 -> PostScript 名
-                } else if (font) {
-                    doc.font = font; // 直接字符串(如 Consolas / Courier New)
-                }
-            } catch (e) { /* 字体设置失败不影响计数, 保留默认字体 */ }
-            doc.tracking = tracking;
-            var just = getJustification(align);
-            if (just !== undefined) { doc.justification = just; } // 取不到则保留默认对齐, 避免崩溃
-            tl.sourceText.setValue(doc);
-
-            // 三个滑块效果: 数值 / 步进 / 小数位 (顺序决定表达式 effect(1/2/3))
-            var fxVal = tl.Effects.addProperty("ADBE Slider Control");
+            // 控制空对象: 数值/步进/小数位 滑块(数位图层统一引用)
+            var ctrl = comp.layers.addNull();
+            ctrl.name = CTRL_NAME;
+            ctrl.enabled = false; // 不可见, 仅作控制
+            var fxVal = ctrl.Effects.addProperty("ADBE Slider Control");
             fxVal.name = "数值";
-            var fxStep = tl.Effects.addProperty("ADBE Slider Control");
+            var fxStep = ctrl.Effects.addProperty("ADBE Slider Control");
             fxStep.name = "步进";
-            var fxDec = tl.Effects.addProperty("ADBE Slider Control");
+            var fxDec = ctrl.Effects.addProperty("ADBE Slider Control");
             fxDec.name = "小数位";
-
-            var valProp = fxVal.property(1);  // Slider Control 唯一属性 = 滑块
+            var valProp = fxVal.property(1);
             var stepProp = fxStep.property(1);
             var decProp = fxDec.property(1);
-
             var t0 = comp.time;
             var t1 = comp.time + frames * comp.frameDuration;
             valProp.setValueAtTime(startVal, t0);
             valProp.setValueAtTime(targetVal, t1);
             stepProp.setValue(step);
             decProp.setValue(dec);
-
             applyEasing(valProp, ease);
 
-            // 源文本表达式: 实时按 数值/步进/小数位 格式化
-            tl.sourceText.expression = buildExpr(pre, suf);
+            // 逐个槽位建独立文本图层
+            for (var i = 0; i < slotCount; i++) {
+                var tl = comp.layers.addText("0");
+                tl.name = "数位 " + i;
+                var doc = tl.sourceText.value;
+                doc.fillColor = [1, 1, 1];
+                doc.fontSize = fontSize;
+                try {
+                    if (ps && ps.length > 0) { doc.font = ps; }
+                } catch (e) { /* 字体失败保留默认 */ }
+                doc.tracking = 0; // 单字符, tracking 无意义
+                var just = getJustification(1); // 每位数位居中于槽
+                if (just !== undefined) { doc.justification = just; }
+                tl.sourceText.setValue(doc);
+                // 固定槽位坐标(每位独立定位 -> 任意字体零抖动)
+                var cx = blockLeft + i * slotW + slotW / 2;
+                tl.position.setValue([cx, cy]);
+                // 源文本表达式: 截取本槽位字符
+                tl.sourceText.expression = buildSlotExpr(i, slotCount, CTRL_NAME);
+            }
 
-            tl.selected = true;
+            ctrl.selected = true;
 
             setStatus(pal,
                 "✓ 已生成: " + startVal + "→" + targetVal + " / " + frames + "帧"
                 + (step > 0 ? " / 步进" + step : "")
                 + (dec > 0 ? " / " + dec + "位小数" : "")
                 + (mono ? " / 等宽" : "")
-                + "\r提示: 拖「数值」滑块关键帧可调节奏, 改小数位/步进滑块即时变",
+                + " / " + slotCount + "位独立图层"
+                + "\r提示: 拖「" + CTRL_NAME + "」的「数值」滑块关键帧调节奏",
                 [0.1, 0.75, 0.35]);
         } catch (e) {
             setStatus(pal, "✗ 出错: " + e.toString(), [0.9, 0.25, 0.2]);
@@ -334,13 +375,27 @@
         pal.decInp.text = "0";
         pal.trackInp.text = "0";
         pal.fontDd.selection = pal.fontDd.items[0]; // 默认
+        refreshStyleDd(pal);
         pal.monoChk.value = true;
         pal.fontDd.enabled = !pal.monoChk.value;
+        pal.styleDd.enabled = !pal.monoChk.value;
         pal.alignDd.selection = pal.alignDd.items[1]; // 中
-        pal.preInp.text = "";
-        pal.sufInp.text = "";
         pal.easeDd.selection = pal.easeDd.items[0];   // 线性
         setStatus(pal, "已重置为默认值", [0.6, 0.6, 0.6]);
+    }
+
+    // ---- 字体两级联动: 家庭变化 -> 重建字重下拉 ----
+    function refreshStyleDd(pal) {
+        var fam = pal.fontDd.selection ? pal.fontDd.selection.text : "（默认）";
+        var styles = gFontStyles[fam];
+        var items = ["常规"];
+        if (styles && styles.length) {
+            items = [];
+            for (var i = 0; i < styles.length; i++) { items.push(styles[i].style); }
+        }
+        pal.styleDd.removeAll();
+        for (var j = 0; j < items.length; j++) { pal.styleDd.add("item", items[j]); }
+        pal.styleDd.selection = pal.styleDd.items[0];
     }
 
     // ---- 标准面板模式: 停靠为面板时不新建窗口 ----
@@ -383,7 +438,7 @@
     var r3 = pParam.add("group"); r3.orientation = "row"; r3.alignChildren = "center";
     r3.add("statictext", undefined, "小数位:");
     pal.decInp = r3.add("edittext", undefined, "0"); pal.decInp.characters = 4;
-    r3.add("statictext", undefined, "字距:");
+    r3.add("statictext", undefined, "字间距(px):");
     pal.trackInp = r3.add("edittext", undefined, "0"); pal.trackInp.characters = 5;
 
     // 字体与对齐区
@@ -394,15 +449,22 @@
 
     var rf1 = pFont.add("group"); rf1.orientation = "row"; rf1.alignChildren = "center";
     rf1.add("statictext", undefined, "字体:");
-    pal.fontDd = rf1.add("dropdownlist", undefined, gFontList);
+    pal.fontDd = rf1.add("dropdownlist", undefined, gFontFamilyList);
     pal.fontDd.selection = pal.fontDd.items[0]; // 默认
-    pal.fontDd.preferredSize.width = 160;
+    pal.fontDd.preferredSize.width = 130;
+    rf1.add("statictext", undefined, "字重:");
+    pal.styleDd = rf1.add("dropdownlist", undefined, ["常规"]);
+    pal.styleDd.selection = pal.styleDd.items[0];
+    pal.styleDd.preferredSize.width = 90;
+    pal.fontDd.onChange = function () { refreshStyleDd(pal); };
 
-    pal.monoChk = pFont.add("checkbox", undefined, "等宽锁定(强制等宽字体, 彻底消除数字抖动)");
+    pal.monoChk = pFont.add("checkbox", undefined, "等宽锁定(强制 Consolas, 适配不同字体零抖动)");
     pal.monoChk.value = true;
-    pal.fontDd.enabled = !pal.monoChk.value; // 等宽锁定开启时禁用字体下拉
+    pal.fontDd.enabled = !pal.monoChk.value; // 等宽锁定开启时禁用字体/字重下拉
+    pal.styleDd.enabled = !pal.monoChk.value;
     pal.monoChk.onClick = function () {
         pal.fontDd.enabled = !pal.monoChk.value;
+        pal.styleDd.enabled = !pal.monoChk.value;
     };
 
     var rf2 = pFont.add("group"); rf2.orientation = "row"; rf2.alignChildren = "center";
@@ -412,12 +474,6 @@
     rf2.add("statictext", undefined, "缓动:");
     pal.easeDd = rf2.add("dropdownlist", undefined, ["线性", "缓入", "缓出", "缓入缓出"]);
     pal.easeDd.selection = pal.easeDd.items[0];
-
-    var rf3 = pFont.add("group"); rf3.orientation = "row"; rf3.alignChildren = "center";
-    rf3.add("statictext", undefined, "前缀:");
-    pal.preInp = rf3.add("edittext", undefined, ""); pal.preInp.characters = 6;
-    rf3.add("statictext", undefined, "后缀:");
-    pal.sufInp = rf3.add("edittext", undefined, ""); pal.sufInp.characters = 6;
 
     // 按钮
     var btnRow = pal.add("group");

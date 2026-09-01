@@ -1,5 +1,9 @@
 # 更新日志（CHANGELOG）
 
+## v1.3.2
+
+- **NumCounter** 架构升级(面板 v0.2.0):改为「独立数位 / odometer」——每位拆独立文本图层 + 控制空对象,任意比例字体零抖动;字体+字重两级联动下拉;移除前后缀、字距改字间距(px)
+
 ## v1.3.1
 
 - **NumCounter** 真机修复(面板 v0.1.1):`ParagraphJustification` 枚举成员名改为 `*_JUSTIFY` 导致报错,改兼容写法;字体由手填改为系统字体下拉(`app.fonts.allFonts`)
