@@ -1,8 +1,12 @@
 # 更新日志（CHANGELOG）
 
-## v1.3.10
+## v1.3.11
 
-- **NumCounter** 修复「存储槽位后对应使用按钮不变可用」(面板 v0.2.8): ScriptUI 在 `onClick` 回调改别的控件 `.enabled` 后不自动重绘, `updateSlotLoadBtns` 末尾加 `pal.layout.layout(true)` 强制刷新(证据: Adobe 社区 Marc Autret 回答 `win.layout.layout(1)` 标准手法)
+- **NumCounter** 修复「存储槽位后对应使用按钮不变可用」真正根因(面板 v0.2.9): 槽位索引 0-based/1-based 错位 —— 存储/使用按钮闭包 `idx` 为 0-based 写成 `presetsCache["0".."3"]`, 而全局约定 1-based("1".."4") 致使用按钮读空槽全灰。修复: 闭包 `onClick` 统一传 `idx+1`, 全链路 1-based 对齐(Node 模拟验证)。v0.2.8 的 `pal.layout.layout(true)` 为误诊, 仅作渲染保险
+
+## v1.3.10（误判: 见 v1.3.11）
+
+- ⚠️ 误判「存储槽位后对应使用按钮不变可用」为 ScriptUI 重绘问题(面板 v0.2.8), 加 `pal.layout.layout(true)`; 经 v0.2.9 重新检索确认为索引错位, 该修复无效
 
 ## v1.3.9
 

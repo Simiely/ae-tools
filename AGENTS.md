@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**：2026-09-01（commit `1c1a6cf`）NumCounter v0.2.8（修复「存储槽位后对应使用按钮不变可用」：ScriptUI 在 `onClick` 回调改别控件 `.enabled` 后不自动重绘，`updateSlotLoadBtns` 末尾加 `pal.layout.layout(true)` 强制刷新，所有调用处补传 `pal`；证据 = Adobe 社区 Marc Autret 回答 `win.layout.layout(1)` 标准手法），根文档同步（四件套保持）
+> 📌 **文档基线**：2026-09-01（commit `e391ca5`）NumCounter v0.2.9（修复「存储槽位后对应使用按钮不变可用」真正根因：存储/使用按钮闭包 `idx` 为 0-based(0..3) 写成 `presetsCache["0".."3"]`，而 `presetsCache`/`updateSlotLoadBtns`/`loadSlotsFromStorage`/`importSlots` 全局约定 1-based("1".."4")，致使用按钮读空槽全灰；修复 = 闭包 `onClick` 统一传 `idx+1`，全链路 1-based 对齐，Node 模拟验证 enabled=[true×4]。v0.2.8 的 `pal.layout.layout(true)` 为误诊，仅作渲染保险），根文档同步（四件套保持）
 > **更新文档/代码后，请更新此行**（日期 + 新 commit hash），并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
