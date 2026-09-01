@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**：2026-09-01（commit 待回填）NumCounter v0.2.2（scheduleTask 修复 Panel 对象无效 + 调试输出区 + 预设存储），根文档同步（四件套保持）
+> 📌 **文档基线**：2026-09-01（commit `fe15c6e`）NumCounter v0.2.2（scheduleTask 修复 Panel 对象无效 + 调试输出区 + 预设存储），根文档同步（四件套保持）
 > **更新文档/代码后，请更新此行**（日期 + 新 commit hash），并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
