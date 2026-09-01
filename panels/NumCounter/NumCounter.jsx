@@ -1,11 +1,12 @@
 ﻿// ============================================================
 // NumCounter · 数字计数器面板 (ScriptUI Panel, ExtendScript ES3)
 //
-// Version: 0.2.0
+// Version: 0.2.2
 // Description: 一键生成「数字从起始值递增到目标值」的动画。
 //   支持步进、小数位、字间距、字体(家庭+字重)、等宽锁定、对齐、缓动。
 //   动画由「数值」滑块关键帧驱动 + 每位独立文本图层的 sourceText 表达式实时格式化。
 //   生成后仍可拖「数值」滑块关键帧调节奏, 改小数位/步进滑块即时变, 无需重跑脚本。
+//   预设: 用 app.settings 持久化参数组合(保存/应用/删除)。
 //
 // 安装: 放到 %APPDATA%\Adobe\After Effects\<ver>\Scripts\ScriptUI Panels\
 //       (本仓库用 python install.py 统一部署)
@@ -16,6 +17,10 @@
 //   本版把每一位拆成固定槽位的独立文本图层, 由共享「数值」滑块驱动,
 //   每位表达式只截取自己那一位的字符。每位待在自己槽里, 邻居不动 -> 任意字体零抖动。
 //   字体/字重通过 app.fonts.allFonts 枚举(家庭 -> 字重两级联动), 适配不同字体。
+//
+// 已知坑(AE ScriptUI 面板):
+//   按钮 onClick 里直接对 AE 项目树做深层修改(新建 effect 后访问其子属性)会报
+//   "Object is invalid"。修复: 用 app.scheduleTask 把生成逻辑延迟一帧到主线程上下文执行。
 // ============================================================
 
 (function (thisObj) {
@@ -53,10 +58,45 @@
         return pre + s + suf;
     }
 
+    // 预设序列化 / 反序列化 (纯函数, node 可测; ES3 无 JSON, 用 key=value& 格式)
+    function serializePreset(o) {
+        function kv(k, v) { return k + "=" + String(v); }
+        return [kv("start", o.start), kv("target", o.target), kv("frames", o.frames),
+            kv("step", o.step), kv("dec", o.dec), kv("track", o.track),
+            kv("font", o.font), kv("style", o.style), kv("align", o.align),
+            kv("ease", o.ease), kv("mono", o.mono ? "true" : "false")].join("&");
+    }
+    function deserializePreset(s) {
+        var o = { start: 0, target: 100, frames: 30, step: 1, dec: 0, track: 0,
+            font: "（默认）", style: "常规", align: 1, ease: 0, mono: true };
+        if (!s) { return o; }
+        var parts = s.split("&");
+        for (var i = 0; i < parts.length; i++) {
+            var kv = parts[i].split("=");
+            if (kv.length < 2) { continue; }
+            var k = kv[0]; var v = kv[1];
+            if (k === "start") { o.start = parseFloat(v); }
+            else if (k === "target") { o.target = parseFloat(v); }
+            else if (k === "frames") { o.frames = parseInt(v, 10); }
+            else if (k === "step") { o.step = parseFloat(v); }
+            else if (k === "dec") { o.dec = parseInt(v, 10); }
+            else if (k === "track") { o.track = parseFloat(v); }
+            else if (k === "font") { o.font = v; }
+            else if (k === "style") { o.style = v; }
+            else if (k === "align") { o.align = parseInt(v, 10); }
+            else if (k === "ease") { o.ease = parseInt(v, 10); }
+            else if (k === "mono") { o.mono = (v === "true"); }
+        }
+        return o;
+    }
+
     // node 测试导出: 在 AE 之外(app 未定义)只导出纯函数并返回, 跳过 UI 代码
     if (typeof app === "undefined") {
         if (typeof module !== "undefined" && module.exports) {
-            module.exports = { snapToStep: snapToStep, formatNumber: formatNumber };
+            module.exports = {
+                snapToStep: snapToStep, formatNumber: formatNumber,
+                serializePreset: serializePreset, deserializePreset: deserializePreset
+            };
         }
         return;
     }
@@ -66,6 +106,15 @@
     // ============================================================
 
     var CTRL_NAME = "NumCounter 控制"; // 控制空对象名(数值/步进/小数位滑块)
+    var PRESET_SECTION = "NumCounter";      // app.settings 分区
+    var PRESET_INDEX_KEY = "_preset_index";  // 预设名索引(用 | 连接)
+
+    // ---- 调试诊断缓冲: 每次生成清空前次, 失败时把详情显示给用户 ----
+    var gDiag = [];
+    function diag(msg) { try { gDiag.push(String(msg)); } catch (e) {} }
+    function flushDiag(pal) {
+        try { if (pal && pal.debugBox) { pal.debugBox.text = gDiag.join("\n"); } } catch (e) {}
+    }
 
     // ---- 字体枚举: 从 app.fonts (AE 24.0+) 取系统字体做两级下拉 ----
     // gFontFamilyList: 家庭名下拉项(含「(默认)」与等宽字体)
@@ -266,18 +315,45 @@
         } catch (e) { /* 缓动失败退化为线性, 计数动画照常 */ }
     }
 
+    // ---- 取 Slider 效果的值属性(多层 fallback, 规避个别 AE 版本子属性判无效) ----
+    // 返回 {prop, info}: prop 为可用属性或 null, info 为诊断字符串
+    function sliderValueProp(eff) {
+        if (!eff) { return { prop: null, info: "eff=null" }; }
+        var tries = [
+            { label: "property(1)", get: function () { return eff.property(1); } },
+            { label: "eff(1)", get: function () { return eff(1); } },
+            { label: 'property("滑块")', get: function () { return eff.property("滑块"); } }
+        ];
+        for (var i = 0; i < tries.length; i++) {
+            try {
+                var p = tries[i].get();
+                if (p !== null && p !== undefined) {
+                    return { prop: p, info: "OK via " + tries[i].label };
+                }
+                diag("  滑块值尝试 " + tries[i].label + " = 空");
+            } catch (e) {
+                diag("  滑块值尝试 " + tries[i].label + " 抛错: " + e.message);
+            }
+        }
+        return { prop: null, info: "全部尝试失败" };
+    }
+
     // ---- 主生成逻辑: 始终拆成每位数位图层 + 控制空对象 ----
+    // 注意: 由 onClick 通过 app.scheduleTask 延迟调用, 规避 Panel 上下文 "对象无效"
     function buildCounter(pal) {
-        var comp = null;
+        gDiag.length = 0;
         try {
-            comp = app.project.activeItem;
+            diag("=== 生成开始 (AE " + (app.version || "?") + ") ===");
+            var comp = app.project.activeItem;
+            diag("comp: " + (comp ? (comp instanceof CompItem ? "CompItem OK" : "非CompItem类型=" + (comp.constructor ? comp.constructor.name : "?")) : "null"));
             if (!(comp && comp instanceof CompItem)) {
                 setStatus(pal, "请先双击打开一个合成, 再点生成。", [0.85, 0.55, 0.1]);
+                flushDiag(pal);
                 return;
             }
 
-            // 强制把合成激活到前台 viewer: 规避新图层属性被 AE 判为 "对象无效" 的已知触发
-            try { comp.openInViewer(); } catch (e) { /* 忽略 */ }
+            // 强制把合成激活到前台 viewer
+            try { comp.openInViewer(); diag("openInViewer OK"); } catch (e) { diag("openInViewer 抛错: " + e.message); }
 
             app.beginUndoGroup("NumCounter 生成");
 
@@ -298,6 +374,9 @@
             var align = pal.alignDd.selection ? pal.alignDd.selection.index : 1; // 0左 1中 2右
             var ease = pal.easeDd.selection ? pal.easeDd.selection.index : 0;     // 0线性 1入 2出 3入出
             var ps = resolveFontPs(pal);
+            diag("参数: start=" + startVal + " target=" + targetVal + " frames=" + frames
+                + " step=" + step + " dec=" + dec + " track=" + tracking + " mono=" + mono
+                + " align=" + align + " ease=" + ease + " font=" + ps);
 
             var fontSize = 120;
             var slotCount = computeSlotCount(startVal, targetVal, dec);
@@ -312,26 +391,41 @@
             // 控制空对象: 数值/步进/小数位 滑块(数位图层统一引用)
             var ctrl = comp.layers.addNull();
             ctrl.name = CTRL_NAME;
+            diag("ctrl 创建: name=" + ctrl.name + " instanceof Layer=" + (ctrl instanceof Layer));
             var fxVal = ctrl.Effects.addProperty("ADBE Slider Control");
             fxVal.name = "数值";
             var fxStep = ctrl.Effects.addProperty("ADBE Slider Control");
             fxStep.name = "步进";
             var fxDec = ctrl.Effects.addProperty("ADBE Slider Control");
             fxDec.name = "小数位";
+            diag("fxVal: typeof=" + (typeof fxVal) + " instanceof PropertyGroup=" + (fxVal instanceof PropertyGroup)
+                + " numProperties=" + (fxVal ? fxVal.numProperties : "?"));
 
-            // 取滑块值属性(多层 fallback, 规避个别 AE 版本 ".property(1)" 报 "对象无效")
-            function sliderValueProp(eff) {
-                if (!eff) { return null; }
-                try { if (eff.property(1)) { return eff.property(1); } } catch (e) {}
-                try { if (eff(1)) { return eff(1); } } catch (e) {}
-                try { if (eff.property("滑块")) { return eff.property("滑块"); } } catch (e) {}
-                return null;
-            }
-            var valProp = sliderValueProp(fxVal);
-            var stepProp = sliderValueProp(fxStep);
-            var decProp = sliderValueProp(fxDec);
+            var r1 = sliderValueProp(fxVal);
+            var r2 = sliderValueProp(fxStep);
+            var r3 = sliderValueProp(fxDec);
+            diag("滑块值获取: 数值=" + r1.info + " | 步进=" + r2.info + " | 小数位=" + r3.info);
+            var valProp = r1.prop, stepProp = r2.prop, decProp = r3.prop;
+
             if (!valProp || !stepProp || !decProp) {
-                setStatus(pal, "创建滑块控制失败(对象无效), 请重试; 若反复出现请反馈 AE 版本。", [0.85, 0.3, 0.3]);
+                // 收集详细诊断, 弹窗 + 状态栏 + 调试框 三处都给, 方便反馈
+                var dmsg = "创建滑块控制失败(对象无效)。\n"
+                    + "comp=" + (comp ? "CompItem" : "null") + "\n"
+                    + "ctrl.name=" + (ctrl ? ctrl.name : "null") + "\n"
+                    + "fxVal typeof=" + (typeof fxVal)
+                    + " instanceof PropertyGroup=" + (fxVal instanceof PropertyGroup)
+                    + " numProperties=" + (fxVal ? fxVal.numProperties : "?") + "\n";
+                try { var t1 = fxVal.property(1); dmsg += "property(1)=" + (t1 != null); }
+                catch (e) { dmsg += "property(1) 抛错: " + e.message; }
+                try { var t2 = fxVal(1); dmsg += "\neff(1)=" + (t2 != null); }
+                catch (e) { dmsg += "\neff(1) 抛错: " + e.message; }
+                try { var t3 = fxVal.property("滑块"); dmsg += "\nproperty(滑块)=" + (t3 != null); }
+                catch (e) { dmsg += "\nproperty(滑块) 抛错: " + e.message; }
+                dmsg += "\n\n如反复出现, 请截此信息反馈(含 AE 版本)。";
+                setStatus(pal, "✗ 创建滑块控制失败(对象无效)", [0.85, 0.3, 0.3]);
+                diag("!! 失败: " + dmsg);
+                flushDiag(pal);
+                alert(dmsg);
                 app.endUndoGroup();
                 return;
             }
@@ -343,9 +437,10 @@
             stepProp.setValue(step);
             decProp.setValue(dec);
             applyEasing(valProp, ease);
+            diag("滑块关键帧设置 OK (数值 " + startVal + "->" + targetVal + ")");
 
             // 所有属性设置完成后再隐藏控制层(提前禁用会导致子属性被判无效)
-            try { ctrl.enabled = false; } catch (e) {}
+            try { ctrl.enabled = false; diag("ctrl.enabled=false OK"); } catch (e) { diag("ctrl.enabled 抛错: " + e.message); }
 
             // 逐个槽位建独立文本图层
             for (var i = 0; i < slotCount; i++) {
@@ -367,6 +462,7 @@
                 // 源文本表达式: 截取本槽位字符
                 tl.sourceText.expression = buildSlotExpr(i, slotCount, CTRL_NAME);
             }
+            diag("数位图层生成 OK: 共 " + slotCount + " 个");
 
             ctrl.selected = true;
 
@@ -378,11 +474,116 @@
                 + " / " + slotCount + "位独立图层"
                 + "\r提示: 拖「" + CTRL_NAME + "」的「数值」滑块关键帧调节奏",
                 [0.1, 0.75, 0.35]);
+            diag("=== 生成成功 ===");
         } catch (e) {
             setStatus(pal, "✗ 出错: " + e.toString(), [0.9, 0.25, 0.2]);
+            diag("!! 异常: " + e.toString() + (e.line !== undefined ? " @line " + e.line : ""));
             showDebugError(e);
         } finally {
             try { app.endUndoGroup(); } catch (e2) {}
+            flushDiag(pal);
+        }
+    }
+
+    // ---- 预设: 用 app.settings 持久化(跨会话) ----
+    function getPresetNames() {
+        try {
+            if (app.settings.haveSetting(PRESET_SECTION, PRESET_INDEX_KEY)) {
+                var s = app.settings.getSetting(PRESET_SECTION, PRESET_INDEX_KEY);
+                if (s && s.length) { return s.split("|"); }
+            }
+        } catch (e) {}
+        return [];
+    }
+    function refreshPresetDd(pal) {
+        var names = getPresetNames();
+        pal.presetDd.removeAll();
+        pal.presetDd.add("item", "（当前参数）");
+        for (var i = 0; i < names.length; i++) { pal.presetDd.add("item", names[i]); }
+        pal.presetDd.selection = pal.presetDd.items[0];
+    }
+    function savePreset(pal) {
+        try {
+            var name = prompt("预设名称:", "预设1");
+            if (!name) { return; }
+            var o = {
+                start: parseFloat(pal.startInp.text) || 0,
+                target: parseFloat(pal.targetInp.text) || 0,
+                frames: parseInt(pal.framesInp.text, 10) || 30,
+                step: parseFloat(pal.stepInp.text) || 0,
+                dec: parseInt(pal.decInp.text, 10) || 0,
+                track: parseFloat(pal.trackInp.text) || 0,
+                font: pal.fontDd.selection ? pal.fontDd.selection.text : "（默认）",
+                style: pal.styleDd.selection ? pal.styleDd.selection.text : "常规",
+                align: pal.alignDd.selection ? pal.alignDd.selection.index : 1,
+                ease: pal.easeDd.selection ? pal.easeDd.selection.index : 0,
+                mono: pal.monoChk.value
+            };
+            var s = serializePreset(o);
+            app.settings.saveSetting(PRESET_SECTION, "preset_" + name, s, "user");
+            var names = getPresetNames();
+            var found = false;
+            for (var i = 0; i < names.length; i++) { if (names[i] === name) { found = true; break; } }
+            if (!found) { names.push(name); }
+            app.settings.saveSetting(PRESET_SECTION, PRESET_INDEX_KEY, names.join("|"), "user");
+            refreshPresetDd(pal);
+            for (var j = 0; j < pal.presetDd.items.length; j++) {
+                if (pal.presetDd.items[j].text === name) { pal.presetDd.selection = pal.presetDd.items[j]; break; }
+            }
+            setStatus(pal, "✓ 已保存预设: " + name, [0.1, 0.75, 0.35]);
+        } catch (e) {
+            setStatus(pal, "✗ 保存预设失败: " + e.toString(), [0.9, 0.25, 0.2]);
+            showDebugError(e);
+        }
+    }
+    function loadPreset(pal) {
+        try {
+            var sel = pal.presetDd.selection;
+            if (!sel || sel.text === "（当前参数）") { setStatus(pal, "请先在下拉选择已存预设", [0.85, 0.55, 0.1]); return; }
+            var name = sel.text;
+            if (!app.settings.haveSetting(PRESET_SECTION, "preset_" + name)) {
+                setStatus(pal, "预设不存在: " + name, [0.9, 0.25, 0.2]); return;
+            }
+            var s = app.settings.getSetting(PRESET_SECTION, "preset_" + name);
+            var o = deserializePreset(s);
+            pal.startInp.text = String(o.start);
+            pal.targetInp.text = String(o.target);
+            pal.framesInp.text = String(o.frames);
+            pal.stepInp.text = String(o.step);
+            pal.decInp.text = String(o.dec);
+            pal.trackInp.text = String(o.track);
+            var fi = -1;
+            for (var i = 0; i < pal.fontDd.items.length; i++) { if (pal.fontDd.items[i].text === o.font) { fi = i; break; } }
+            if (fi >= 0) { pal.fontDd.selection = pal.fontDd.items[fi]; refreshStyleDd(pal); }
+            var si = -1;
+            for (var k = 0; k < pal.styleDd.items.length; k++) { if (pal.styleDd.items[k].text === o.style) { si = k; break; } }
+            if (si >= 0) { pal.styleDd.selection = pal.styleDd.items[si]; }
+            pal.monoChk.value = o.mono;
+            pal.fontDd.enabled = !o.mono;
+            pal.styleDd.enabled = !o.mono;
+            if (o.align >= 0 && o.align < pal.alignDd.items.length) { pal.alignDd.selection = pal.alignDd.items[o.align]; }
+            if (o.ease >= 0 && o.ease < pal.easeDd.items.length) { pal.easeDd.selection = pal.easeDd.items[o.ease]; }
+            setStatus(pal, "✓ 已应用预设: " + name, [0.1, 0.75, 0.35]);
+        } catch (e) {
+            setStatus(pal, "✗ 应用预设失败: " + e.toString(), [0.9, 0.25, 0.2]);
+            showDebugError(e);
+        }
+    }
+    function deletePreset(pal) {
+        try {
+            var sel = pal.presetDd.selection;
+            if (!sel || sel.text === "（当前参数）") { setStatus(pal, "请先选择要删除的预设", [0.85, 0.55, 0.1]); return; }
+            var name = sel.text;
+            try { app.settings.deleteSetting(PRESET_SECTION, "preset_" + name); } catch (e) {}
+            var names = getPresetNames();
+            var out = [];
+            for (var i = 0; i < names.length; i++) { if (names[i] !== name) { out.push(names[i]); } }
+            app.settings.saveSetting(PRESET_SECTION, PRESET_INDEX_KEY, out.join("|"), "user");
+            refreshPresetDd(pal);
+            setStatus(pal, "✓ 已删除预设: " + name, [0.6, 0.6, 0.6]);
+        } catch (e) {
+            setStatus(pal, "✗ 删除预设失败: " + e.toString(), [0.9, 0.25, 0.2]);
+            showDebugError(e);
         }
     }
 
@@ -432,16 +633,6 @@
     pParam.orientation = "column";
     pParam.alignChildren = "fill";
     pParam.spacing = 6;
-
-    function row(parent, label) {
-        var g = parent.add("group");
-        g.orientation = "row";
-        g.alignChildren = "center";
-        g.add("statictext", undefined, label);
-        var inp = g.add("edittext", undefined, "");
-        inp.characters = 8;
-        return inp;
-    }
 
     var r1 = pParam.add("group"); r1.orientation = "row"; r1.alignChildren = "center";
     r1.add("statictext", undefined, "起始数字:");
@@ -495,13 +686,41 @@
     pal.easeDd = rf2.add("dropdownlist", undefined, ["线性", "缓入", "缓出", "缓入缓出"]);
     pal.easeDd.selection = pal.easeDd.items[0];
 
+    // 预设区 (app.settings 持久化)
+    var pPreset = pal.add("panel", undefined, "预设");
+    pPreset.orientation = "column";
+    pPreset.alignChildren = "fill";
+    pPreset.spacing = 6;
+    var pr1 = pPreset.add("group"); pr1.orientation = "row"; pr1.alignChildren = "center";
+    pr1.add("statictext", undefined, "预设:");
+    pal.presetDd = pr1.add("dropdownlist", undefined, ["（当前参数）"]);
+    pal.presetDd.selection = pal.presetDd.items[0];
+    pal.presetDd.preferredSize.width = 150;
+    var pr2 = pPreset.add("group"); pr2.orientation = "row"; pr2.alignment = "center"; pr2.spacing = 8;
+    var btnSave = pr2.add("button", undefined, "保存预设");
+    var btnLoad = pr2.add("button", undefined, "应用预设");
+    var btnDel = pr2.add("button", undefined, "删除预设");
+    btnSave.onClick = function () { savePreset(pal); };
+    btnLoad.onClick = function () { loadPreset(pal); };
+    btnDel.onClick = function () { deletePreset(pal); };
+    refreshPresetDd(pal); // 填充已存预设
+
     // 按钮
     var btnRow = pal.add("group");
     btnRow.orientation = "row";
     btnRow.alignment = "center";
     btnRow.spacing = 10;
     var btnGen = btnRow.add("button", undefined, "生成");
-    btnGen.onClick = function () { buildCounter(pal); };
+    // 关键修复: 用 scheduleTask 延迟到主线程上下文执行, 规避 Panel 按钮回调里
+    // 新建 effect 子属性被 AE 判为 "对象无效" 的已知坑
+    btnGen.onClick = function () {
+        NC_pal = pal; // 全局引用, 供 scheduleTask 字符串回调访问
+        try {
+            app.scheduleTask("if (typeof NC_buildCounter === 'function') { NC_buildCounter(NC_pal); }", 0);
+        } catch (e) {
+            buildCounter(pal); // 兜底: 个别环境 scheduleTask 不可用则直接执行
+        }
+    };
     var btnReset = btnRow.add("button", undefined, "重置");
     btnReset.onClick = function () { resetInputs(pal); };
 
@@ -513,7 +732,16 @@
     pal.status.alignment = ["fill", "center"];
     pal.status.preferredSize = [300, 40];
 
+    // 调试输出区 (实时显示诊断, 便于复制反馈)
+    var dbgPanel = pal.add("panel", undefined, "调试输出");
+    dbgPanel.alignChildren = "fill";
+    pal.debugBox = dbgPanel.add("edittext", undefined, "", { multiline: true, readonly: true });
+    pal.debugBox.preferredSize = [300, 90];
+
     if (pal instanceof Window) { pal.center(); pal.show(); }
     else { pal.layout.layout(true); }
+
+    // 暴露到全局, 供 scheduleTask 字符串回调引用(无 var -> 全局属性)
+    NC_buildCounter = buildCounter;
 
 })(this);

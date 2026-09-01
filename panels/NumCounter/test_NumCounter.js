@@ -47,6 +47,28 @@ eq("fmt 100/0 $ %", T.formatNumber(100, 0, "$", "%"), "$100%");
 eq("fmt 12.3/1 ¥", T.formatNumber(12.3, 1, "¥", ""), "¥12.3");
 eq("fmt -3/0 前导", T.formatNumber(-3, 0, "(", ")"), "(-3)");
 
+// ---- 预设序列化 / 反序列化 往返 ----
+var po = { start: 0, target: 100, frames: 30, step: 1, dec: 0, track: 0,
+    font: "（默认）", style: "常规", align: 1, ease: 0, mono: true };
+var po2 = T.deserializePreset(T.serializePreset(po));
+eq("preset 默认 start", po2.start, 0);
+eq("preset 默认 target", po2.target, 100);
+eq("preset 默认 frames", po2.frames, 30);
+eq("preset 默认 mono", po2.mono, true);
+eq("preset 默认 align", po2.align, 1);
+eq("preset 默认 font", po2.font, "（默认）");
+
+var po3 = { start: 5, target: 12.3, frames: 24, step: 0, dec: 1, track: 4,
+    font: "Arial", style: "Bold", align: 2, ease: 3, mono: false };
+var po4 = T.deserializePreset(T.serializePreset(po3));
+eq("preset2 start", po4.start, 5);
+eq("preset2 target", po4.target, 12.3);
+eq("preset2 dec", po4.dec, 1);
+eq("preset2 mono", po4.mono, false);
+eq("preset2 font", po4.font, "Arial");
+eq("preset2 style", po4.style, "Bold");
+eq("preset2 ease", po4.ease, 3);
+
 console.log("");
 console.log("断言: " + passed + " 通过, " + failed + " 失败");
 if (failed > 0) { process.exit(1); }

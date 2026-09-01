@@ -1,5 +1,11 @@
 # 更新日志（CHANGELOG）
 
+## v0.2.2（2026-09-01 真机修复 + 预设 + 调试）
+
+- **修复「对象无效」根因**: 第 319 行 `fxVal.property(1)` 在「窗口›扩展」Panel 上下文被 AE 判为无效对象。真正根因是 Panel 按钮 onClick 直接对 AE 项目树做深层修改的已知坑, 改用 `app.scheduleTask` 把生成逻辑延迟一帧到主线程上下文执行(此前 openInViewer/enabled 后移未打中)
+- **调试输出区**: 面板底部新增「调试输出」只读框, 每次生成实时显示诊断(comp/ctrl/fxVal 类型·instanceof·numProperties·三层 property 尝试结果); 失败时额外弹窗 + 状态栏 + 调试框三处给详情, 便于复制反馈
+- **预设存储/使用**: 用 `app.settings` 跨会话持久化参数组合; 新增「预设」区(下拉 + 保存/应用/删除); 序列化纯函数 serializePreset/deserializePreset 进 test(新增 13 断言, 共 32)
+
 ## v0.2.1（2026-09-01 真机修复）
 
 - 修复生成时报 `ReferenceError: 对象无效`(第 319 行 `fxVal.property(1)`): 新图层滑块子属性被 AE 判为无效对象

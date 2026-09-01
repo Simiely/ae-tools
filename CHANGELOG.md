@@ -1,5 +1,9 @@
 # 更新日志（CHANGELOG）
 
+## v1.3.4
+
+- **NumCounter** 修复 Panel 上下文「对象无效」根因(面板 v0.2.2):改用 `app.scheduleTask` 延迟执行生成;新增调试输出区(实时诊断 + 失败弹窗);新增预设存储/使用(`app.settings` 持久化参数组合)
+
 ## v1.3.3
 
 - **NumCounter** 真机修复(面板 v0.2.1):生成时 `ReferenceError: 对象无效`(`fxVal.property(1)`);规避 = `comp.openInViewer()` 激活合成 + `ctrl.enabled=false` 后移 + 滑块属性多层 fallback;失败给友好报错
