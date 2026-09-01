@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**：2026-09-01（commit `c6f96a4`）NumCounter v0.2.5（修复「保存预设报错」：`app.settings.saveSetting` 第 4 参 `prefType` 传字符串被拒；预设改存工程目录 `NumCounter.presets` 文件，跟随工程走），根文档同步（四件套保持）
+> 📌 **文档基线**：2026-09-01（commit `6898eba`）NumCounter v0.2.6（修复「数字始终不动」真正根因：`setValueAtTime` 签名实为 `(time, newValue)`，此前把值误当时间致关键帧错放 100s；改 `addKey+setValueAtKey` 并加 `numKeys/valueAtTime` 验证；预设升级为真正 JSON `NumCounter.presets.json`），根文档同步（四件套保持）
 > **更新文档/代码后，请更新此行**（日期 + 新 commit hash），并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。

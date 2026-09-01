@@ -1,5 +1,9 @@
 # 更新日志（CHANGELOG）
 
+## v1.3.8
+
+- **NumCounter** 修复「数字始终不动」的**真正根因**(面板 v0.2.6):`setValueAtTime` 官方签名 = `(time, newValue)`(时间在前), 本插件自 odometer 引入起一直写成 `setValueAtTime(startVal, t0)`, 把「值」误送到「时间」, 关键帧被错放到 100 秒处, 可见区间内数值恒≈0 ⇒ 不动。v0.2.0 起「数字不动」的恒定主因即此; v0.2.4 的 `enabled=true` 仅排除禁用冻结这一次要因素。修法: 改用无歧义的 `addKey + setValueAtKey` 并加 `numKeys`/`valueAtTime` 数据层验证。预设文件 `NumCounter.presets` 升级为真正 JSON `NumCounter.presets.json`(ES3 禁用 JSON.parse, 手写构造 + 受控 eval 读取)。来源: Adobe 官方 Property 文档 + AE 标准手册示例
+
 ## v1.3.7
 
 - **NumCounter** 修复「保存预设报错」(面板 v0.2.5):根因 = v0.2.2 用 `app.settings.saveSetting(..., "user")` 第 4 参传字符串, 而官方指南第 4 参是 `prefType`(无符号整数)被拒;改为预设存**工程目录文件** `NumCounter.presets`(UTF-8, 每行 `name|序列化串`), 跟随工程走、无 1999 字节上限; 工程未保存提示先存盘, 写文件需开「允许脚本写入文件」。来源: ae-scripting.docsforadobe.dev · Settings object
