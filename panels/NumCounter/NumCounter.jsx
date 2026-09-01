@@ -276,6 +276,9 @@
                 return;
             }
 
+            // 强制把合成激活到前台 viewer: 规避新图层属性被 AE 判为 "对象无效" 的已知触发
+            try { comp.openInViewer(); } catch (e) { /* 忽略 */ }
+
             app.beginUndoGroup("NumCounter 生成");
 
             var startVal = parseFloat(pal.startInp.text);
@@ -309,16 +312,30 @@
             // 控制空对象: 数值/步进/小数位 滑块(数位图层统一引用)
             var ctrl = comp.layers.addNull();
             ctrl.name = CTRL_NAME;
-            ctrl.enabled = false; // 不可见, 仅作控制
             var fxVal = ctrl.Effects.addProperty("ADBE Slider Control");
             fxVal.name = "数值";
             var fxStep = ctrl.Effects.addProperty("ADBE Slider Control");
             fxStep.name = "步进";
             var fxDec = ctrl.Effects.addProperty("ADBE Slider Control");
             fxDec.name = "小数位";
-            var valProp = fxVal.property(1);
-            var stepProp = fxStep.property(1);
-            var decProp = fxDec.property(1);
+
+            // 取滑块值属性(多层 fallback, 规避个别 AE 版本 ".property(1)" 报 "对象无效")
+            function sliderValueProp(eff) {
+                if (!eff) { return null; }
+                try { if (eff.property(1)) { return eff.property(1); } } catch (e) {}
+                try { if (eff(1)) { return eff(1); } } catch (e) {}
+                try { if (eff.property("滑块")) { return eff.property("滑块"); } } catch (e) {}
+                return null;
+            }
+            var valProp = sliderValueProp(fxVal);
+            var stepProp = sliderValueProp(fxStep);
+            var decProp = sliderValueProp(fxDec);
+            if (!valProp || !stepProp || !decProp) {
+                setStatus(pal, "创建滑块控制失败(对象无效), 请重试; 若反复出现请反馈 AE 版本。", [0.85, 0.3, 0.3]);
+                app.endUndoGroup();
+                return;
+            }
+
             var t0 = comp.time;
             var t1 = comp.time + frames * comp.frameDuration;
             valProp.setValueAtTime(startVal, t0);
@@ -326,6 +343,9 @@
             stepProp.setValue(step);
             decProp.setValue(dec);
             applyEasing(valProp, ease);
+
+            // 所有属性设置完成后再隐藏控制层(提前禁用会导致子属性被判无效)
+            try { ctrl.enabled = false; } catch (e) {}
 
             // 逐个槽位建独立文本图层
             for (var i = 0; i < slotCount; i++) {

@@ -1,5 +1,9 @@
 # 更新日志（CHANGELOG）
 
+## v1.3.3
+
+- **NumCounter** 真机修复(面板 v0.2.1):生成时 `ReferenceError: 对象无效`(`fxVal.property(1)`);规避 = `comp.openInViewer()` 激活合成 + `ctrl.enabled=false` 后移 + 滑块属性多层 fallback;失败给友好报错
+
 ## v1.3.2
 
 - **NumCounter** 架构升级(面板 v0.2.0):改为「独立数位 / odometer」——每位拆独立文本图层 + 控制空对象,任意比例字体零抖动;字体+字重两级联动下拉;移除前后缀、字距改字间距(px)
