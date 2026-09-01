@@ -1,13 +1,15 @@
 ﻿// ============================================================
 // NumCounter · 数字计数器面板 (ScriptUI Panel, ExtendScript ES3)
 //
-// Version: 0.2.7
+// Version: 0.2.8
 // Description: 一键生成「数字从起始值递增到目标值」的动画。
 //   支持步进、小数位、字间距、字体(家庭+字重)、等宽锁定、对齐、缓动。
 //   动画由「数值」滑块关键帧驱动 + 每位独立文本图层的 sourceText 表达式实时格式化。
 //   生成后仍可拖「数值」滑块关键帧调节奏, 改小数位/步进滑块即时变, 无需重跑脚本。
 //   预设: 对齐仓库 AE-Lyrics-Animator 等「预设槽」实践 —— 固定 4 槽位(存储/使用/清空) + 导出导入,
 //         存于工程所在目录的 NumCounter.presets.json(跟随工程走, 避开会崩的 app.settings)。
+//   2026-09-01 v0.2.8 修复: 存储槽位后对应「使用」按钮不变可用 —— ScriptUI 在 onClick 回调里
+//         改别的控件 .enabled 后不自动重绘, updateSlotLoadBtns 末尾加 pal.layout.layout(true) 强制刷新。
 //
 // 2026-09-01 v0.2.6 关键修复: 此前 setValueAtTime(startVal, t0) 把「值」传到了「时间」参数,
 //   关键帧被错放到 100 秒处, 可见播放区间内数值恒≈0 => 数字不动。改为无歧义的
@@ -669,7 +671,7 @@
         } catch (e) { return null; }
     }
     // 读工程 JSON -> 恢复 presetsCache(启动时调用)
-    function loadSlotsFromStorage() {
+    function loadSlotsFromStorage(pal) {
         var f = getPresetFile();
         if (f && f.exists) {
             try {
@@ -686,7 +688,7 @@
                 }
             } catch (e) { try { f.close(); } catch (e2) {} }
         }
-        updateSlotLoadBtns();
+        updateSlotLoadBtns(pal);
     }
     function writeSlotsToStorage() {
         var f = getPresetFile();
@@ -737,12 +739,15 @@
         if (p.ease >= 0 && p.ease < pal.easeDd.items.length) { pal.easeDd.selection = pal.easeDd.items[p.ease]; }
     }
     // 按内存缓存更新「使用」按钮可用状态(空槽位禁用)
-    function updateSlotLoadBtns() {
+    // 注意: ScriptUI 在按钮 onClick 回调里同步改别的控件 .enabled 后不会立即重绘,
+    // 必须 pal.layout.layout(true) 强制刷新, 否则「存储后使用按钮仍灰」(启动阶段因脚本末尾 layout 兜底才生效)。
+    function updateSlotLoadBtns(pal) {
         if (!gSlotLoadBtns || !gSlotLoadBtns.length) { return; }
         for (var i = 0; i < gSlotLoadBtns.length; i++) {
             var sk = String(i + 1);
             gSlotLoadBtns[i].enabled = !!presetsCache[sk];
         }
+        if (pal && pal.layout) { try { pal.layout.layout(true); } catch (e) {} }
     }
     // 存储: 当前面板参数 -> 槽位 idx(内存 + 写工程 JSON)
     function saveSlot(pal, idx) {
@@ -753,8 +758,8 @@
             }
             presetsCache[String(idx)] = collectParams(pal);
             if (writeSlotsToStorage()) {
-                updateSlotLoadBtns();
-                setStatus(pal, "✓ 已存储到预设槽 " + idx + " → 工程目录 NumCounter.presets.json", [0.1, 0.75, 0.35]);
+            updateSlotLoadBtns(pal);
+            setStatus(pal, "✓ 已存储到预设槽 " + idx + " → 工程目录 NumCounter.presets.json", [0.1, 0.75, 0.35]);
             } else {
                 setStatus(pal, "✗ 写入预设文件失败(请开启『允许脚本写入文件』)", [0.9, 0.25, 0.2]);
             }
@@ -780,8 +785,8 @@
         try {
             presetsCache = { "1": null, "2": null, "3": null, "4": null };
             if (writeSlotsToStorage()) {
-                updateSlotLoadBtns();
-                setStatus(pal, "✓ 已清空全部预设槽", [0.6, 0.6, 0.6]);
+            updateSlotLoadBtns(pal);
+            setStatus(pal, "✓ 已清空全部预设槽", [0.6, 0.6, 0.6]);
             } else {
                 setStatus(pal, "✗ 写入预设文件失败", [0.9, 0.25, 0.2]);
             }
@@ -823,7 +828,7 @@
                 if (data.slots[sk]) { presetsCache[sk] = data.slots[sk]; n++; }
             }
             writeSlotsToStorage();
-            updateSlotLoadBtns();
+            updateSlotLoadBtns(pal);
             setStatus(pal, "✓ 已导入 " + n + " 个预设槽", [0.1, 0.75, 0.35]);
         } catch (e) {
             setStatus(pal, "✗ 导入失败: " + e.toString(), [0.9, 0.25, 0.2]);
@@ -965,7 +970,7 @@
     btnClear.onClick = function () { clearAllSlots(pal); };
     btnExport.onClick = function () { exportSlots(pal); };
     btnImport.onClick = function () { importSlots(pal); };
-    loadSlotsFromStorage(); // 启动恢复槽位 + 更新「使用」按钮可用状态
+    loadSlotsFromStorage(pal); // 启动恢复槽位 + 更新「使用」按钮可用状态
 
     // 按钮
     var btnRow = pal.add("group");

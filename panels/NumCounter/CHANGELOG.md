@@ -1,5 +1,13 @@
 # 更新日志（CHANGELOG）
 
+## v0.2.8（2026-09-01 修复「存储后使用按钮不变可用」）
+
+- **现象**: 点「存储预设 N」成功后, 对应的「使用预设 N」按钮仍是灰的(不可用), 需重启 AE 才生效
+- **根因(ScriptUI 行为, 搜索权威确认)**: 在按钮 `onClick` 回调里同步修改另一个控件的 `.enabled` 后, AE 不会自动重绘该控件 —— 启动阶段之所以正常, 是因为脚本末尾 `pal.layout.layout(true)` 兜底刷新了一次; 但「存储」发生在事件循环里, 没有这步兜底, 故视觉态没更新
+- **权威证据**: Adobe 社区 Marc Autret 正确回答 — 在 `onClick` 中改控件外观后必须调用 `win.layout.layout(1)` 强制重绘(LayoutManager 标准手法)
+- **修复**: `updateSlotLoadBtns(pal)` 在所有槽位状态写完后调用 `pal.layout.layout(true)` 强制刷新; 该函数由 `saveSlot / clearAllSlots / importSlots / loadSlotsFromStorage` 调用并统一传入 `pal`
+- **验证**: node 语法 OK + 60 断言全过; install.py 部署 AE 26.0; 推 GitHub
+
 ## v0.2.7（2026-09-01 预设改为「4 槽位」模式, 对齐仓库预设槽实践）
 
 - **需求**: 用户要求预设改成仓库其他插件(AE-Lyrics-Animator / starry-sky / Water-Rise / Rolling-Lyrics / QuickKey)统一的「预设槽」形式, 而非 v0.2.5/0.2.6 的「名称下拉 + 保存/应用/删除」
