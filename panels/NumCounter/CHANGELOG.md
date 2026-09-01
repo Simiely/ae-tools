@@ -1,11 +1,16 @@
 # 更新日志（CHANGELOG）
 
-## v0.2.8（2026-09-01 修复「存储后使用按钮不变可用」）
+## v0.2.9（2026-09-01 修复「存储后使用按钮不变可用」真正根因: 槽位索引错位）
 
-- **现象**: 点「存储预设 N」成功后, 对应的「使用预设 N」按钮仍是灰的(不可用), 需重启 AE 才生效
-- **根因(ScriptUI 行为, 搜索权威确认)**: 在按钮 `onClick` 回调里同步修改另一个控件的 `.enabled` 后, AE 不会自动重绘该控件 —— 启动阶段之所以正常, 是因为脚本末尾 `pal.layout.layout(true)` 兜底刷新了一次; 但「存储」发生在事件循环里, 没有这步兜底, 故视觉态没更新
-- **权威证据**: Adobe 社区 Marc Autret 正确回答 — 在 `onClick` 中改控件外观后必须调用 `win.layout.layout(1)` 强制重绘(LayoutManager 标准手法)
-- **修复**: `updateSlotLoadBtns(pal)` 在所有槽位状态写完后调用 `pal.layout.layout(true)` 强制刷新; 该函数由 `saveSlot / clearAllSlots / importSlots / loadSlotsFromStorage` 调用并统一传入 `pal`
+- **现象**: 点「存储预设 N」成功后, 对应的「使用预设 N」按钮仍是灰的(不可用)
+- **根因(读代码 + Node 模拟验证, 非渲染问题)**: 存储/使用按钮闭包 `(function(idx){...})(si)` 中 `si=0..3` → 闭包 `idx` 为 0-based(0..3); `saveSlot/loadSlot` 用 `presetsCache[String(idx)]` 写成 "0".."3"。而 `presetsCache` 初始化 / `updateSlotLoadBtns`(用 `String(i+1)`) / `loadSlotsFromStorage` / `importSlots` 全程约定 **1-based("1".."4")** → 使用按钮读 `presetsCache["1".."4"]` 全为 null → 全灰; 数据却错位落在 "0".."3"
+- **误诊回顾**: v0.2.8 误判为 ScriptUI 重绘并加 `pal.layout.layout(true)`, 实测无效 —— 根因在索引, 不在渲染
+- **修复**: 闭包 `onClick` 统一传 `idx + 1`(存储 `saveSlot(pal, idx+1)` / 使用 `loadSlot(pal, idx+1)`), 全链路 1-based 对齐。Node 模拟确认: 存 1-4 后使用按钮 enabled = [true,true,true,true]
+- **验证**: 语法 OK + 60 断言通过; install.py 部署 AE 26.0
+
+## v0.2.8（2026-09-01 误判: 非重绘, 见 v0.2.9）
+
+- ⚠️ 误判「存储后使用按钮仍灰」为 ScriptUI 重绘问题并加 `pal.layout.layout(true)`; 经 v0.2.9 重新检索确认根因为槽位索引 0-based/1-based 错位, 该 layout 仅作渲染保险, 非主修复
 - **验证**: node 语法 OK + 60 断言全过; install.py 部署 AE 26.0; 推 GitHub
 
 ## v0.2.7（2026-09-01 预设改为「4 槽位」模式, 对齐仓库预设槽实践）

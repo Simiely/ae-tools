@@ -1,15 +1,17 @@
 ﻿// ============================================================
 // NumCounter · 数字计数器面板 (ScriptUI Panel, ExtendScript ES3)
 //
-// Version: 0.2.8
+// Version: 0.2.9
 // Description: 一键生成「数字从起始值递增到目标值」的动画。
 //   支持步进、小数位、字间距、字体(家庭+字重)、等宽锁定、对齐、缓动。
 //   动画由「数值」滑块关键帧驱动 + 每位独立文本图层的 sourceText 表达式实时格式化。
 //   生成后仍可拖「数值」滑块关键帧调节奏, 改小数位/步进滑块即时变, 无需重跑脚本。
 //   预设: 对齐仓库 AE-Lyrics-Animator 等「预设槽」实践 —— 固定 4 槽位(存储/使用/清空) + 导出导入,
 //         存于工程所在目录的 NumCounter.presets.json(跟随工程走, 避开会崩的 app.settings)。
-//   2026-09-01 v0.2.8 修复: 存储槽位后对应「使用」按钮不变可用 —— ScriptUI 在 onClick 回调里
-//         改别的控件 .enabled 后不自动重绘, updateSlotLoadBtns 末尾加 pal.layout.layout(true) 强制刷新。
+//   2026-09-01 v0.2.9 修复: v0.2.8 把「存储后使用按钮仍灰」误诊断为 ScriptUI 重绘(layout(true) 无效)。
+//         真正根因=槽位索引错位: 存储/使用按钮闭包 idx 为 0-based(0..3)→写 presetsCache["0".."3"];
+//         而 presetsCache / updateSlotLoadBtns 全局约定 1-based("1".."4")→使用按钮读空槽全灰。
+//         修复: 闭包 onClick 统一传 idx+1, 全链路 1-based 对齐(已 Node 模拟验证)。
 //
 // 2026-09-01 v0.2.6 关键修复: 此前 setValueAtTime(startVal, t0) 把「值」传到了「时间」参数,
 //   关键帧被错放到 100 秒处, 可见播放区间内数值恒≈0 => 数字不动。改为无歧义的
@@ -739,8 +741,9 @@
         if (p.ease >= 0 && p.ease < pal.easeDd.items.length) { pal.easeDd.selection = pal.easeDd.items[p.ease]; }
     }
     // 按内存缓存更新「使用」按钮可用状态(空槽位禁用)
-    // 注意: ScriptUI 在按钮 onClick 回调里同步改别的控件 .enabled 后不会立即重绘,
-    // 必须 pal.layout.layout(true) 强制刷新, 否则「存储后使用按钮仍灰」(启动阶段因脚本末尾 layout 兜底才生效)。
+    // 槽位 key 全程 1-based("1".."4"): presetsCache / saveSlot / loadSlot / 此处 String(i+1) 一致。
+    // 注意: 此前 v0.2.8 误判为 ScriptUI 重绘; 真因是闭包 idx 0-based 致 key 错位(已修)。
+    // pal.layout.layout(true) 仅作渲染保险(启用状态变更后强制重排), 非主修复。
     function updateSlotLoadBtns(pal) {
         if (!gSlotLoadBtns || !gSlotLoadBtns.length) { return; }
         for (var i = 0; i < gSlotLoadBtns.length; i++) {
@@ -947,7 +950,7 @@
         (function(idx) {
             var b = prSave.add("button", undefined, String(idx + 1));
             b.preferredSize = [26, 22];
-            b.onClick = function () { saveSlot(pal, idx); };
+            b.onClick = function () { saveSlot(pal, idx + 1); }; // idx 为 0-based, 槽位约定 1-based("1".."4")
         })(si);
     }
     // 使用行: 1-4(空槽位禁用, 启动后由 loadSlotsFromStorage 更新)
@@ -959,7 +962,7 @@
             b.preferredSize = [26, 22];
             b.enabled = false;
             gSlotLoadBtns.push(b);
-            b.onClick = function () { loadSlot(pal, idx); };
+            b.onClick = function () { loadSlot(pal, idx + 1); }; // idx 为 0-based, 槽位约定 1-based("1".."4")
         })(li);
     }
     // 工具行: 清空 / 导出 / 导入
