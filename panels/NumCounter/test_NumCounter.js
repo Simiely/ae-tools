@@ -69,6 +69,20 @@ eq("preset2 font", po4.font, "Arial");
 eq("preset2 style", po4.style, "Bold");
 eq("preset2 ease", po4.ease, 3);
 
+// ---- 预设名/行 纯函数 ----
+eq("sanitize |", T.sanitizePresetName("a|b"), "a_b");
+eq("sanitize 换行", T.sanitizePresetName("a\nb"), "a_b");
+eq("format line", T.formatPresetLine("p1", "start=0&target=1"), "p1|start=0&target=1");
+eq("parse name", T.parsePresetLine("p1|start=0&target=1").name, "p1");
+eq("parse serialized", T.parsePresetLine("p1|start=0&target=1").serialized, "start=0&target=1");
+eq("parse 无| 返回null", T.parsePresetLine("noline"), null);
+eq("parse 空 返回null", T.parsePresetLine(""), null);
+var pl = T.formatPresetLine(po3.start + "_" + po3.target, T.serializePreset(po3));
+var pp = T.parsePresetLine(pl);
+var po5 = T.deserializePreset(pp.serialized);
+eq("line 往返 target", po5.target, 12.3);
+eq("line 往返 mono", po5.mono, false);
+
 console.log("");
 console.log("断言: " + passed + " 通过, " + failed + " 失败");
 if (failed > 0) { process.exit(1); }

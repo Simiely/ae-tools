@@ -1,12 +1,12 @@
 ﻿// ============================================================
 // NumCounter · 数字计数器面板 (ScriptUI Panel, ExtendScript ES3)
 //
-// Version: 0.2.2
+// Version: 0.2.5
 // Description: 一键生成「数字从起始值递增到目标值」的动画。
 //   支持步进、小数位、字间距、字体(家庭+字重)、等宽锁定、对齐、缓动。
 //   动画由「数值」滑块关键帧驱动 + 每位独立文本图层的 sourceText 表达式实时格式化。
 //   生成后仍可拖「数值」滑块关键帧调节奏, 改小数位/步进滑块即时变, 无需重跑脚本。
-//   预设: 用 app.settings 持久化参数组合(保存/应用/删除)。
+//   预设: 存为工程所在目录的 NumCounter.presets 文件(保存/应用/删除), 跟随工程走。
 //
 // 安装: 放到 %APPDATA%\Adobe\After Effects\<ver>\Scripts\ScriptUI Panels\
 //       (本仓库用 python install.py 统一部署)
@@ -90,12 +90,28 @@
         return o;
     }
 
+    // 预设名/行的纯函数(可测): 一行 = name|序列化串; name 禁 | 和换行
+    function sanitizePresetName(name) {
+        return String(name).replace(/[\|\r\n]+/g, "_");
+    }
+    function formatPresetLine(name, serialized) {
+        return sanitizePresetName(name) + "|" + serialized;
+    }
+    function parsePresetLine(line) {
+        if (!line) { return null; }
+        var idx = line.indexOf("|");
+        if (idx < 0) { return null; }
+        return { name: line.substring(0, idx), serialized: line.substring(idx + 1) };
+    }
+
     // node 测试导出: 在 AE 之外(app 未定义)只导出纯函数并返回, 跳过 UI 代码
     if (typeof app === "undefined") {
         if (typeof module !== "undefined" && module.exports) {
             module.exports = {
                 snapToStep: snapToStep, formatNumber: formatNumber,
-                serializePreset: serializePreset, deserializePreset: deserializePreset
+                serializePreset: serializePreset, deserializePreset: deserializePreset,
+                sanitizePresetName: sanitizePresetName, formatPresetLine: formatPresetLine,
+                parsePresetLine: parsePresetLine
             };
         }
         return;
@@ -106,8 +122,7 @@
     // ============================================================
 
     var CTRL_NAME = "NumCounter 控制"; // 控制空对象名(数值/步进/小数位滑块)
-    var PRESET_SECTION = "NumCounter";      // app.settings 分区
-    var PRESET_INDEX_KEY = "_preset_index";  // 预设名索引(用 | 连接)
+    var PRESET_FILE_NAME = "NumCounter.presets"; // 预设文件: 存于工程所在目录
 
     // ---- 调试诊断缓冲: 每次生成清空前次, 失败时把详情显示给用户 ----
     var gDiag = [];
@@ -517,15 +532,62 @@
         }
     }
 
-    // ---- 预设: 用 app.settings 持久化(跨会话) ----
-    function getPresetNames() {
+    // ---- 预设: 存为工程所在目录下的 NumCounter.presets 文件 ----
+    // 取预设文件对象; 工程未保存时返回 null(需在 UI 层提示先保存工程)
+    function getPresetFile() {
         try {
-            if (app.settings.haveSetting(PRESET_SECTION, PRESET_INDEX_KEY)) {
-                var s = app.settings.getSetting(PRESET_SECTION, PRESET_INDEX_KEY);
-                if (s && s.length) { return s.split("|"); }
-            }
-        } catch (e) {}
-        return [];
+            if (!app.project || !app.project.file) { return null; }
+            var folder = app.project.file.parent;
+            if (!folder) { return null; }
+            return new File(folder.fsName + "/" + PRESET_FILE_NAME);
+        } catch (e) { return null; }
+    }
+    function readPresetLines() {
+        var f = getPresetFile();
+        var lines = [];
+        if (f && f.exists) {
+            try {
+                f.encoding = "UTF-8";
+                if (f.open("r")) {
+                    var txt = String(f.read());
+                    f.close();
+                    var arr = txt.split("\n");
+                    for (var i = 0; i < arr.length; i++) {
+                        var ln = arr[i].replace(/\r$/, "");
+                        if (ln.length) { lines.push(ln); }
+                    }
+                }
+            } catch (e) { try { f.close(); } catch (e2) {} }
+        }
+        return lines;
+    }
+    function writePresetLines(lines) {
+        var f = getPresetFile();
+        if (!f) { return false; }
+        try {
+            f.encoding = "UTF-8";
+            if (!f.open("w")) { return false; }
+            for (var i = 0; i < lines.length; i++) { f.writeln(lines[i]); }
+            f.close();
+            return true;
+        } catch (e) { try { f.close(); } catch (e2) {} return false; }
+    }
+    function getPresetNames() {
+        var lines = readPresetLines();
+        var names = [];
+        for (var i = 0; i < lines.length; i++) {
+            var p = parsePresetLine(lines[i]);
+            if (p) { names.push(p.name); }
+        }
+        return names;
+    }
+    function findPresetSerialized(name) {
+        var lines = readPresetLines();
+        for (var i = 0; i < lines.length; i++) {
+            var p = parsePresetLine(lines[i]);
+            if (p && p.name === name) { return p.serialized; }
+        }
+        return null;
     }
     function refreshPresetDd(pal) {
         var names = getPresetNames();
@@ -536,6 +598,10 @@
     }
     function savePreset(pal) {
         try {
+            if (!getPresetFile()) {
+                setStatus(pal, "✗ 请先保存工程 (Ctrl/Cmd+S) 再保存预设", [0.9, 0.55, 0.1]);
+                return;
+            }
             var name = prompt("预设名称:", "预设1");
             if (!name) { return; }
             var o = {
@@ -552,17 +618,25 @@
                 mono: pal.monoChk.value
             };
             var s = serializePreset(o);
-            app.settings.saveSetting(PRESET_SECTION, "preset_" + name, s, "user");
-            var names = getPresetNames();
-            var found = false;
-            for (var i = 0; i < names.length; i++) { if (names[i] === name) { found = true; break; } }
-            if (!found) { names.push(name); }
-            app.settings.saveSetting(PRESET_SECTION, PRESET_INDEX_KEY, names.join("|"), "user");
-            refreshPresetDd(pal);
-            for (var j = 0; j < pal.presetDd.items.length; j++) {
-                if (pal.presetDd.items[j].text === name) { pal.presetDd.selection = pal.presetDd.items[j]; break; }
+            var sName = sanitizePresetName(name);
+            var lines = readPresetLines();
+            var replaced = false;
+            var out = [];
+            for (var i = 0; i < lines.length; i++) {
+                var p = parsePresetLine(lines[i]);
+                if (p && p.name === sName) { out.push(formatPresetLine(sName, s)); replaced = true; }
+                else { out.push(lines[i]); }
             }
-            setStatus(pal, "✓ 已保存预设: " + name, [0.1, 0.75, 0.35]);
+            if (!replaced) { out.push(formatPresetLine(sName, s)); }
+            if (writePresetLines(out)) {
+                refreshPresetDd(pal);
+                for (var j = 0; j < pal.presetDd.items.length; j++) {
+                    if (pal.presetDd.items[j].text === sName) { pal.presetDd.selection = pal.presetDd.items[j]; break; }
+                }
+                setStatus(pal, "✓ 已保存预设: " + sName + " → 工程目录 NumCounter.presets", [0.1, 0.75, 0.35]);
+            } else {
+                setStatus(pal, "✗ 写入预设文件失败(请开启『允许脚本写入文件』)", [0.9, 0.25, 0.2]);
+            }
         } catch (e) {
             setStatus(pal, "✗ 保存预设失败: " + e.toString(), [0.9, 0.25, 0.2]);
             showDebugError(e);
@@ -570,13 +644,15 @@
     }
     function loadPreset(pal) {
         try {
+            if (!getPresetFile()) {
+                setStatus(pal, "✗ 请先保存工程 (Ctrl/Cmd+S) 再读取预设", [0.9, 0.55, 0.1]);
+                return;
+            }
             var sel = pal.presetDd.selection;
             if (!sel || sel.text === "（当前参数）") { setStatus(pal, "请先在下拉选择已存预设", [0.85, 0.55, 0.1]); return; }
             var name = sel.text;
-            if (!app.settings.haveSetting(PRESET_SECTION, "preset_" + name)) {
-                setStatus(pal, "预设不存在: " + name, [0.9, 0.25, 0.2]); return;
-            }
-            var s = app.settings.getSetting(PRESET_SECTION, "preset_" + name);
+            var s = findPresetSerialized(name);
+            if (s === null) { setStatus(pal, "预设不存在: " + name, [0.9, 0.25, 0.2]); return; }
             var o = deserializePreset(s);
             pal.startInp.text = String(o.start);
             pal.targetInp.text = String(o.target);
@@ -603,16 +679,25 @@
     }
     function deletePreset(pal) {
         try {
+            if (!getPresetFile()) {
+                setStatus(pal, "✗ 请先保存工程 (Ctrl/Cmd+S)", [0.9, 0.55, 0.1]); return;
+            }
             var sel = pal.presetDd.selection;
             if (!sel || sel.text === "（当前参数）") { setStatus(pal, "请先选择要删除的预设", [0.85, 0.55, 0.1]); return; }
             var name = sel.text;
-            try { app.settings.deleteSetting(PRESET_SECTION, "preset_" + name); } catch (e) {}
-            var names = getPresetNames();
+            var lines = readPresetLines();
             var out = [];
-            for (var i = 0; i < names.length; i++) { if (names[i] !== name) { out.push(names[i]); } }
-            app.settings.saveSetting(PRESET_SECTION, PRESET_INDEX_KEY, out.join("|"), "user");
-            refreshPresetDd(pal);
-            setStatus(pal, "✓ 已删除预设: " + name, [0.6, 0.6, 0.6]);
+            for (var i = 0; i < lines.length; i++) {
+                var p = parsePresetLine(lines[i]);
+                if (p && p.name === name) { continue; }
+                out.push(lines[i]);
+            }
+            if (writePresetLines(out)) {
+                refreshPresetDd(pal);
+                setStatus(pal, "✓ 已删除预设: " + name, [0.6, 0.6, 0.6]);
+            } else {
+                setStatus(pal, "✗ 写入预设文件失败", [0.9, 0.25, 0.2]);
+            }
         } catch (e) {
             setStatus(pal, "✗ 删除预设失败: " + e.toString(), [0.9, 0.25, 0.2]);
             showDebugError(e);
@@ -718,7 +803,7 @@
     pal.easeDd = rf2.add("dropdownlist", undefined, ["线性", "缓入", "缓出", "缓入缓出"]);
     pal.easeDd.selection = pal.easeDd.items[0];
 
-    // 预设区 (app.settings 持久化)
+    // 预设区 (存于工程目录文件)
     var pPreset = pal.add("panel", undefined, "预设");
     pPreset.orientation = "column";
     pPreset.alignChildren = "fill";

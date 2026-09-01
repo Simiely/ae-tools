@@ -1,5 +1,13 @@
 # 更新日志（CHANGELOG）
 
+## v0.2.5（2026-09-01 修复「保存预设报错」+ 预设改为工程目录文件）
+
+- **现象**: 保存预设报 `Error: After Effects错误: 由于参数 4，无法调用"saveSetting"。user 不是无符号整数。`（第 555 行附近）
+- **根因(经搜索权威确认)**: v0.2.2 用 `app.settings.saveSetting(section, key, value, "user")` 存预设, 第 4 参传了字符串 `"user"`; 官方 AE 脚本指南(ae-scripting.docsforadobe.dev · Settings object)写明 `saveSetting(sectionName, keyName, value[, prefType])`, 第 4 参是 `prefType`(PREFType 枚举, 实为无符号整数), 传字符串即被拒 → 报错。此外 `app.settings` 存进全局 AE 偏好, 不随工程走、且有 1999 字节上限, 与「预设存工程目录」的诉求不符
+- **修法**: 预设改为**工程目录文件存储** —— `app.project.file.parent` 取工程所在目录, 写 `NumCounter.presets`(UTF-8, 每行 `name|序列化串`), 保存/应用/删除全走文件读写; 工程未保存时提示先 Ctrl/Cmd+S; 写文件需开启 AE 首选项「允许脚本写入文件与访问网络」
+- **纠正**: v0.2.2 用 `app.settings` 持久化预设的方案本版废弃; 序列化纯函数 serializePreset/deserializePreset 保留, 新增文件行纯函数 sanitizePresetName/formatPresetLine/parsePresetLine 进 test(新增 9 断言, 共 41)
+- 面板 CHANGELOG v0.2.5 / 根 CHANGELOG v1.3.7
+
 ## v0.2.4（2026-09-01 修复「生成成功但数字不动」）
 
 - **现象**: 生成无报错、调试输出全 OK, 但播放时数字不递增
