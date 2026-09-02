@@ -1,9 +1,10 @@
 ﻿/*!
- * 滚动歌词生成器 V2 (Rolling Lyrics Generator V2) v2.0.0
+ * 滚动歌词生成器 V2 (Rolling Lyrics Generator V2) v2.0.13
  * ---------------------------------------------------------------
  * V2 新增（基于 v1 v3.7；v1 文件冻结不动）：
  *   - 「滚动句数」：1 / 2 / 3 句一起滚动（默认 1 = v1 行为；生成后可在 AE 控件实时改）
  *   - 「组内行间距」：N 句组内行间距 (px)，仅 >1 句时生效（默认与"两句歌词间距"一致）
+ *   - 「水平对齐」：左对齐 / 居中 / 右对齐（默认居中 = 原行为；生成后可在 AE 控件实时改）
  *   - 滚动/缩放/透明度改为按「组」计算：整组同时滚动、整组到中心一起放大
  * ---------------------------------------------------------------
  * v1 版本历史（v3.7 及之前）：
@@ -15,7 +16,7 @@
  *   2. 调整参数（文本框填数字），点击"生成滚动歌词"
  *   3. 生成后选中 Lyrics_Ctrl 空对象，在效果控件里直接改参数，全部实时生效：
  *      最大字号 / 普通字号 / 间距 / 组内行间距 / 滚动句数 /
- *      最大透明度 / 普通透明度 / 滚动帧数 / 停顿帧数 / 停顿随机(开关) / 抖动帧数
+ *      最大透明度 / 普通透明度 / 滚动帧数 / 停顿帧数 / 停顿随机(开关) / 抖动帧数 / 水平对齐
  *   4. 参数可存为预设（面板"预设管理"区），下次一键载入
  *
  * 效果：
@@ -79,7 +80,8 @@
         maxSize: "最大字号", normalSize: "普通字号", gap: "间距",
         multiGap: "组内行间距", lines: "滚动句数",
         maxOpacity: "最大透明度", normalOpacity: "普通透明度",
-        scroll: "滚动帧数", pause: "停顿帧数", pauseRandom: "停顿随机", jitter: "抖动帧数"
+        scroll: "滚动帧数", pause: "停顿帧数", pauseRandom: "停顿随机", jitter: "抖动帧数",
+        align: "水平对齐"
     };
 
     var DEFAULTS = {
@@ -88,12 +90,13 @@
         scrollFrames: 9, pauseFrames: 30,
         pauseRandom: false, jitterFrames: 10,
         fitLong: true,
-        linesPerScroll: 1, multiGap: 145   // V2：一次滚动句数（任意 ≥1）+ 组内行间距 (px)
+        linesPerScroll: 1, multiGap: 145,   // V2：一次滚动句数（任意 ≥1）+ 组内行间距 (px)
+        align: 1                            // 水平对齐：0=左对齐 1=居中 2=右对齐（默认居中 = 原行为）
     };
 
     // ---- 预设常量（对齐 AE-Lyrics-Animator 双层持久化方案） ----
     var PRESET_COUNT = 4;
-    var PRESET_VERSION = 3; // v3：新增 linesPerScroll / multiGap 短键（lps / mg）；v2 新增 pauseRandom / jitterFrames（pr / jit）
+    var PRESET_VERSION = 4; // v4：新增 align 短键（al）；v3 新增 linesPerScroll / multiGap（lps / mg）；v2 新增 pauseRandom / jitterFrames（pr / jit）
     var SETTINGS_SECTION = "Rolling_Lyrics";
     var SETTINGS_KEY_PREFIX = "preset_";
     var PRESET_FILENAME = "滚动歌词预设.json";
@@ -219,7 +222,8 @@
             jitterFrames: (ui.eJitter) ? SCRIPTS.util.numVal(ui.eJitter.text, DEFAULTS.jitterFrames) : DEFAULTS.jitterFrames,
             fitLong: ui.fitChk.value,
             linesPerScroll: (ui.eLines) ? Math.max(1, Math.round(parseFloat(ui.eLines.text) || DEFAULTS.linesPerScroll)) : DEFAULTS.linesPerScroll,
-            multiGap: (ui.eMultiGap) ? SCRIPTS.util.numVal(ui.eMultiGap.text, DEFAULTS.multiGap) : DEFAULTS.multiGap
+            multiGap: (ui.eMultiGap) ? SCRIPTS.util.numVal(ui.eMultiGap.text, DEFAULTS.multiGap) : DEFAULTS.multiGap,
+            align: (ui.alignSel && ui.alignSel.selection !== null) ? Math.max(0, Math.min(2, ui.alignSel.selection.index)) : DEFAULTS.align
         };
     };
 
@@ -232,13 +236,13 @@
             sf: params.scrollFrames, pf: params.pauseFrames,
             pr: params.pauseRandom ? 1 : 0, jit: params.jitterFrames,
             fit: params.fitLong,
-            lps: params.linesPerScroll, mg: params.multiGap
+            lps: params.linesPerScroll, mg: params.multiGap, al: params.align
         };
     };
 
     // 预设 → 参数（缺失字段回退默认，兼容旧预设）
     SCRIPTS.preset.fromPreset = function (p) {
-        if (!p) { return { maxSize: DEFAULTS.maxSize, normalSize: DEFAULTS.normalSize, gap: DEFAULTS.gap, maxOpacity: DEFAULTS.maxOpacity, normalOpacity: DEFAULTS.normalOpacity, scrollFrames: DEFAULTS.scrollFrames, pauseFrames: DEFAULTS.pauseFrames, pauseRandom: DEFAULTS.pauseRandom, jitterFrames: DEFAULTS.jitterFrames, fitLong: DEFAULTS.fitLong, linesPerScroll: DEFAULTS.linesPerScroll, multiGap: DEFAULTS.multiGap }; }
+        if (!p) { return { maxSize: DEFAULTS.maxSize, normalSize: DEFAULTS.normalSize, gap: DEFAULTS.gap, maxOpacity: DEFAULTS.maxOpacity, normalOpacity: DEFAULTS.normalOpacity, scrollFrames: DEFAULTS.scrollFrames, pauseFrames: DEFAULTS.pauseFrames, pauseRandom: DEFAULTS.pauseRandom, jitterFrames: DEFAULTS.jitterFrames, fitLong: DEFAULTS.fitLong, linesPerScroll: DEFAULTS.linesPerScroll, multiGap: DEFAULTS.multiGap, align: DEFAULTS.align }; }
         return {
             maxSize: SCRIPTS.util.numVal(p.max, DEFAULTS.maxSize),
             normalSize: SCRIPTS.util.numVal(p.nor, DEFAULTS.normalSize),
@@ -251,7 +255,8 @@
             jitterFrames: SCRIPTS.util.numVal(p.jit, DEFAULTS.jitterFrames),
             fitLong: (p.fit !== undefined) ? !!p.fit : DEFAULTS.fitLong,
             linesPerScroll: (p.lps !== undefined) ? Math.max(1, Math.round(p.lps)) : DEFAULTS.linesPerScroll,
-            multiGap: SCRIPTS.util.numVal(p.mg, DEFAULTS.multiGap)
+            multiGap: SCRIPTS.util.numVal(p.mg, DEFAULTS.multiGap),
+            align: (p.al !== undefined) ? Math.max(0, Math.min(2, Math.round(p.al))) : DEFAULTS.align
         };
     };
 
@@ -270,6 +275,7 @@
         ui.fitChk.value = params.fitLong;
         if (ui.eLines) { ui.eLines.text = String(params.linesPerScroll); }
         if (ui.eMultiGap) { ui.eMultiGap.text = String(params.multiGap); }
+        if (ui.alignSel) { ui.alignSel.selection = Math.max(0, Math.min(2, params.align)); }
     };
 
     // 工程目录预设 JSON 文件路径（跟工程走）
@@ -477,7 +483,7 @@
         var k = Math.max(1, Math.round(params.linesPerScroll || 1));
         var m = Math.ceil(n / k);
 
-        // 11 个参数控件（效果名中文显示；表达式用 effect("中文名")(1) 引用，中文版 AE 可用）
+        // 12 个参数控件（效果名中文显示；表达式用 effect("中文名")(1) 引用，中文版 AE 可用）
         SCRIPTS.core.addSliderControl(ctrl, CN.maxSize, params.maxSize);
         SCRIPTS.core.addSliderControl(ctrl, CN.normalSize, params.normalSize);
         SCRIPTS.core.addSliderControl(ctrl, CN.gap, params.gap);
@@ -489,6 +495,8 @@
         SCRIPTS.core.addSliderControl(ctrl, CN.pause, params.pauseFrames);
         SCRIPTS.core.addCheckboxControl(ctrl, CN.pauseRandom, params.pauseRandom);
         SCRIPTS.core.addSliderControl(ctrl, CN.jitter, params.jitterFrames);
+        // 水平对齐：滑块 0=左对齐 1=居中 2=右对齐（表达式阈值 <0.5/<1.5 判定）
+        SCRIPTS.core.addSliderControl(ctrl, CN.align, (params.align === undefined) ? DEFAULTS.align : params.align);
 
         // 滚动位置表达式（V2：按「组」滚动；全部显式 var，消除未声明变量污染）。
         // m 组，组步长 step = mg*(k-1) + g（组内 k-1 个组内行间距 + 组间 1 个间距）；
@@ -572,7 +580,16 @@
             "var kkAct = Math.min(kk, nn - gi*kk);",   // 本组实际句数（最后一组可能不满）
             "var rel = gi*step + (ii - (kkAct-1)/2)*mg;",
             "var y = c.transform.position[1] + (rel - ((mnum-1)/2)*step);",
-            "[" + centerX + " + (m[0] - " + centerX + "), y + (m[1] - " + centerY + ")]"
+            // 水平对齐：ax = 相对画面中心的水平偏移（左 距边 30px / 居中 / 右 距边 30px）
+            // 用 sourceRectAtTime 取每句实际文本宽（fitLong 缩窄后/放大句都能对齐到位）；
+            // w 乘 transform.scale[0]/100（实时缩放）→ 放大的当前句把指定边也贴到目标，
+            // 否则中心缩放会让左/右边缘随放大向右左漂移（v2.0.11 修复：放大句左/右对齐不准）。
+            "var al = c.effect(\"" + CN.align + "\")(1);",
+            "var scl = transform.scale[0] / 100;",
+            "var w = sourceRectAtTime(time, false).width * scl;",
+            "var W2 = thisComp.width/2;",
+            "var ax = (al < 0.5) ? (30 + w/2 - W2) : ((al < 1.5) ? 0 : (W2 - 30 - w/2));",
+            "[m[0] + ax, y + (m[1] - " + centerY + ")]"
         ].join("\n");
 
         L.transform.scale.expression = [
@@ -643,16 +660,27 @@
         var centerIdx = (n - 1) / 2;
         var L, td, fit, rr, i;
 
+        // 写入一句歌词：
+        //   1) 源层若为段落(有边框)文本框(boxText)，先放宽框宽以防 AE 按框宽自动换行，
+        //      否则超出框宽的句号/标点会被排到下一行行首（v2.0.12）。
+        //   2) 显式锁定横向从左到右(direction=LTR)：源层若继承了 RTL/双向方向，AE 的 bidi 引擎
+        //      会把本在句尾的句号重排到行首（最左）——用户"句号本该在最右却在最左"即此类（v2.0.13）。
+        var applyLyricText = function (txt, size) {
+            var d = L.text.sourceText.value;
+            try { if (d && d.boxText) { d.boxTextSize = [comp.width * 2 + 200, 5000]; } } catch (e) { /* 兼容无该属性的版本 */ }
+            try { if (d && typeof ParagraphDirection !== "undefined" && d.direction !== ParagraphDirection.DIRECTION_LEFT_TO_RIGHT) { d.direction = ParagraphDirection.DIRECTION_LEFT_TO_RIGHT; } } catch (e2) { /* 兼容无方向属性的版本 */ }
+            d.text = txt;
+            d.fontSize = size;
+            L.text.sourceText.setValue(d);
+        };
+
         // ---- 生成歌词图层（有源图层则继承样式，否则用默认文本样式） ----
         for (i = 0; i < n; i++) {
             L = SCRIPTS.core.createLyricLayer(comp, srcLayer, i);
 
             // 超长句自动缩窄：真实文本测量（先设文本字号 → 实测 → 超宽再缩）
             fit = SCRIPTS.core.measureFit(lyrics[i], normalSize, maxSize, maxW, params.fitLong, function (txt, size) {
-                td = L.text.sourceText.value;
-                td.text = txt;
-                td.fontSize = size;
-                L.text.sourceText.setValue(td);
+                applyLyricText(txt, size);
                 rr = L.sourceRectAtTime(0, false);
                 return (rr && rr.width) ? rr.width : 0;
             });
@@ -661,10 +689,7 @@
             caps.push(fit.cap);
 
             // 最终写回文本与字号（fitLong 关闭时直接用普通字号）
-            td = L.text.sourceText.value;
-            td.text = lyrics[i];
-            td.fontSize = fit.base;
-            L.text.sourceText.setValue(td);
+            applyLyricText(lyrics[i], fit.base);
 
             rr = L.sourceRectAtTime(0, false);
             L.transform.anchorPoint.setValue([rr.left + rr.width / 2, rr.top + rr.height / 2]);
@@ -677,12 +702,15 @@
         }
 
         // ---- 滚动控制器 + 总控制（参数控件挂在 Lyrics_Ctrl 上） ----
+        // 关键：align 必须从这里透传给 buildController，否则控件走 DEFAULTS→恒为居中
+        //（与 v2.0.3 修过的 linesPerScroll/multiGap 漏传同类）
         var ctl = SCRIPTS.core.buildController(comp, n, {
             maxSize: maxSize, normalSize: normalSize, gap: gap,
             maxOpacity: maxOpacity, normalOpacity: normalOpacity,
             scrollFrames: scrollFrames, pauseFrames: pauseFrames,
             pauseRandom: pauseRandom, jitterFrames: jitterFrames,
-            linesPerScroll: linesPerScroll, multiGap: multiGap   // V2：修复漏传导致 setValue(undefined)
+            linesPerScroll: linesPerScroll, multiGap: multiGap,
+            align: (params.align === undefined) ? DEFAULTS.align : Math.max(0, Math.min(2, Math.round(params.align)))
         });
 
         // 合成时长：只延长不截断（合成里已有更长的内容如背景音乐时保持原时长）
@@ -919,6 +947,19 @@
         fitChk.value = true;
         fitChk.alignment = ["fill", "center"];
 
+        // 水平对齐：左对齐 / 居中 / 右对齐（对应 AE 控件「水平对齐」滑块 0/1/2）
+        var alignRow = pal.add("group");
+        alignRow.orientation = "row";
+        alignRow.alignChildren = "center";
+        alignRow.spacing = 8;
+        var alignLb = alignRow.add("statictext", undefined, "水平对齐：");
+        alignLb.preferredSize.width = 180;
+        alignLb.alignment = ["left", "center"];
+        var alignSel = alignRow.add("dropdownlist", undefined, ["左对齐", "居中", "右对齐"]);
+        alignSel.selection = DEFAULTS.align;
+        alignSel.preferredSize.width = 90;
+        alignSel.alignment = ["fill", "center"];
+
         // ---- 预设管理（参考 AE-Lyrics-Animator：槽位按钮 + 双层持久化） ----
         var presetGrp = pal.add("panel");
         presetGrp.text = "  预设管理";
@@ -981,7 +1022,7 @@
         UI = {
             pal: pal, btn: btn, eLyrics: eLyrics,
             eMax: eMax, eNormal: eNormal, eGap: eGap,
-            eLines: eLines, eMultiGap: eMultiGap,
+            eLines: eLines, eMultiGap: eMultiGap, alignSel: alignSel,
             eMaxOp: eMaxOp, eNormalOp: eNormalOp,
             eScroll: eScroll, ePause: ePause,
             pauseRandomChk: pauseRandomChk, eJitter: eJitter,

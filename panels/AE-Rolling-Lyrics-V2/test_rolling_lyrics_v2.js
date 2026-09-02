@@ -51,11 +51,13 @@ function mockFxGroup(ctrlValues) {
     return { addProperty: function () { return mockFx(ctrlValues); } };
 }
 function mockLayer(ctrlValues) {
+    var sc = [100, 100];              // 数组对象：position 表达式读 transform.scale[0]/[1]
+    sc.expression = "";
     return {
         name: "", startTime: 0,
         transform: {
             position: { setValue: function () {}, expression: "" },
-            scale: { expression: "" },
+            scale: sc,
             opacity: { expression: "" }
         },
         property: function () { return mockFxGroup(ctrlValues); }
@@ -69,7 +71,9 @@ function mockComp(W, H, f, ctrlValues) {
 }
 
 /* ================= 真实表达式求值环境 ================= */
-function makeEnv(ctrlValues, W, H, f) {
+// sourceRectAtTime：表达式里读每句实际文本宽；mock 返回固定宽 srcW（默认 300）
+//   实际 AE 返回该句的真实测量宽，测试用固定值即可验证对齐偏移公式
+function makeEnv(ctrlValues, W, H, f, srcW) {
     var ctrlPos = { 0: W / 2, 1: H / 2 };      // Lyrics_Ctrl 位置（先求值 ctrl 表达式后写入）
     var masterPos = { 0: W / 2, 1: H / 2 };    // Lyrics_Master（初始在画面中心）
     var ctrlObj = { transform: { position: ctrlPos }, effect: ctrlEffect };
@@ -79,6 +83,11 @@ function makeEnv(ctrlValues, W, H, f) {
         frameDuration: 1 / f, width: W, height: H,
         layer: function (name) { return (name === "Lyrics_Ctrl") ? ctrlObj : masterObj; }
     };
+    var srcWidth = (srcW === undefined) ? 300 : srcW;
+    function srcRect() { return { width: srcWidth }; }
+    // 当前图层实时缩放（position 表达式读 transform.scale[0]）：每帧由该层 scale 表达式求值后写回
+    var currentScale = [100, 100];
+    function setScale(arr) { currentScale = arr; }
     // AE 表达式语义：多条语句，最后一条语句的值作为结果（若最后为 if/else，返回分支值）。
     // JS 的 function 不自动返回语句值，这里把表达式包装成 IIFE + return 尾行。
     function wrapExpr(expr) {
@@ -100,14 +109,15 @@ function makeEnv(ctrlValues, W, H, f) {
 
     function evalExpr(expr, time) {
         var fn = new Function(
-            "time", "thisComp", "effect", "seedRandom", "random", "ease", "linear",
+            "time", "thisComp", "effect", "seedRandom", "random", "ease", "linear", "sourceRectAtTime", "transform",
             "return " + wrapExpr(expr) + ";"
         );
-        return fn(time, thisComp, ctrlEffect, seedRandom, random, ease, linear);
+        return fn(time, thisComp, ctrlEffect, seedRandom, random, ease, linear, srcRect, { scale: currentScale });
     }
     return {
         evalExpr: evalExpr,
         setCtrlPos: function (xy) { ctrlPos[0] = xy[0]; ctrlPos[1] = xy[1]; },
+        setScale: setScale,
         ctrlPos: ctrlPos
     };
 }
@@ -125,16 +135,18 @@ function snapshot(params, n, W, H, f) {
     }
     return { env: makeEnv(ctrlValues, W, H, f), ctrlExpr: ctl.ctrl.transform.position.expression, layers: layers };
 }
-// 对给定时刻求值：先 ctrl（写入 ctrlPos），再每句 3 条
+// 对给定时刻求值：先 ctrl（写入 ctrlPos），再每层 先 scale（写回供 position 读缩放）→ position → opacity
 function valuesAt(snap, time) {
     var ctrlXY = snap.env.evalExpr(snap.ctrlExpr, time);
     snap.env.setCtrlPos(ctrlXY);
     var out = [];
     for (var i = 0; i < snap.layers.length; i++) {
         var L = snap.layers[i];
+        var sc = snap.env.evalExpr(L.transform.scale.expression, time);
+        snap.env.setScale(sc);
         out.push({
             pos: snap.env.evalExpr(L.transform.position.expression, time),
-            scale: snap.env.evalExpr(L.transform.scale.expression, time),
+            scale: sc,
             opacity: snap.env.evalExpr(L.transform.opacity.expression, time)
         });
     }
@@ -152,7 +164,8 @@ function nearly(a, b, eps) { return Math.abs(a - b) <= (eps || 0.001); }
 /* ================= 用例 ================= */
 var P = { maxSize: 60, normalSize: 40, gap: 145, multiGap: 145, linesPerScroll: 1,
           maxOpacity: 100, normalOpacity: 30,
-          scrollFrames: 9, pauseFrames: 30, pauseRandom: false, jitterFrames: 10 };
+          scrollFrames: 9, pauseFrames: 30, pauseRandom: false, jitterFrames: 10,
+          align: 1 };
 var W = 1920, H = 1080, FPS = 30;
 
 console.log("== 用例 1: k=1（默认，应等同 v1 单句滚动）==");
@@ -238,6 +251,111 @@ P.linesPerScroll = 10;
 var v10 = valuesAt(snapshot(P, 5, W, H, FPS), 0);
 assert(nearly((v10.layers[0].pos[1] + v10.layers[4].pos[1]) / 2, H / 2), "k=10 > n=5：整组对称居中");
 assert(nearly(v10.layers[2].opacity, P.maxOpacity), "k≥n 时全部句 100% 透明度");
+
+console.log("== 用例 10: 水平对齐（左/中/右，x 位置；文本宽 mock=300，边距 30）==");
+P.linesPerScroll = 1; P.align = 1;
+var sC = snapshot(P, 3, W, H, FPS);
+// k=1 且 t=0：句0 为当前句（放大），句1/2 为普通句
+assert(nearly(valuesAt(sC, 0).layers[0].pos[0], W / 2), "居中：句0（放大句）x = 画面中心 (960)");
+assert(nearly(valuesAt(sC, 0).layers[1].pos[0], W / 2), "居中：普通句 x = 画面中心（缩放不破坏居中）");
+P.align = 0;
+var sL = snapshot(P, 3, W, H, FPS);
+var big = P.maxSize / P.normalSize;               // 放大句（当前句 句0）实时缩放 = 1.5
+var wide = 300 * big;                             // 放大句实际渲染宽 = 450
+assert(nearly(valuesAt(sL, 0).layers[1].pos[0], 30 + 150), "左对齐：普通句 x = 边距30 + 半宽150 (180)");
+assert(nearly(valuesAt(sL, 0).layers[0].pos[0], 30 + wide / 2), "左对齐：放大句左缘贴齐 30（缩放感知，x=255）");
+P.align = 2;
+var sR = snapshot(P, 3, W, H, FPS);
+assert(nearly(valuesAt(sR, 0).layers[1].pos[0], W - 30 - 150), "右对齐：普通句 x = 右边距 (1740)");
+assert(nearly(valuesAt(sR, 0).layers[0].pos[0], W - 30 - wide / 2), "右对齐：放大句右缘贴齐 W-30（缩放感知）");
+assert(nearly(valuesAt(sC, 0).layers[0].pos[0], valuesAt(sC, 0).layers[1].pos[0]), "居中对齐：各行 x 一致");
+
+console.log("== 用例 11: buildLyrics → buildController 参数透传（回归：v2.0.10 曾漏传 align ⇒ 滑块恒为居中）==");
+function buildLyricsAlign(alignVal, n, W2, H2, f) {
+    var ctv = {};
+    function lyricLayer(cv) {
+        var td = { text: "", fontSize: 40 };
+        return {
+            name: "", startTime: 0,
+            transform: { position: { setValue: function () {}, expression: "" },
+                         scale: { expression: "" }, opacity: { expression: "" },
+                         anchorPoint: { setValue: function () {} } },
+            text: { sourceText: { value: td, setValue: function (v) { td.text = v.text; td.fontSize = v.fontSize; } } },
+            sourceRectAtTime: function () { return { left: 0, top: 0, width: 300, height: 50 }; },
+            property: function () { return mockFxGroup(cv); }
+        };
+    }
+    var comp = {
+        width: W2, height: H2, frameDuration: 1 / f, numLayers: 0,
+        duration: 100,
+        layers: { addNull: function () { return lyricLayer(ctv); }, addText: function () { return lyricLayer(ctv); } }
+    };
+    var p = { maxSize: 60, normalSize: 40, gap: 145, multiGap: 145, linesPerScroll: 1,
+              maxOpacity: 100, normalOpacity: 30, scrollFrames: 9, pauseFrames: 30,
+              pauseRandom: false, jitterFrames: 10, fitLong: false, align: alignVal };
+    var lines = [];
+    for (var i = 0; i < n; i++) { lines.push("测试歌词" + (i + 1)); }
+    SCRIPTS.core.buildLyrics(comp, null, p, lines.join("\n"));
+    return ctv;
+}
+assert(buildLyricsAlign(0, 3, W, H, FPS)["水平对齐"] === 0, "面板选左对齐 → 生成后「水平对齐」控件 = 0（左）");
+assert(buildLyricsAlign(2, 3, W, H, FPS)["水平对齐"] === 2, "面板选右对齐 → 生成后「水平对齐」控件 = 2（右）");
+
+console.log("== 用例 12: 段落文本框(boxText)写入时自动放宽框宽，避免歌词换行把句号挤到行首（v2.0.12）==");
+function buildLyricsBoxTextWiden() {
+    var last = null;
+    function ly() {
+        var tv = { text: "", fontSize: 40, boxText: true };
+        return {
+            name: "", startTime: 0,
+            transform: { position: { setValue: function () {}, expression: "" },
+                         scale: [100, 100], opacity: { expression: "" },
+                         anchorPoint: { setValue: function () {} } },
+            text: { sourceText: { value: tv, setValue: function (v) { last = v; if (v && v.boxTextSize) { tv.boxTextSize = v.boxTextSize; } } } },
+            sourceRectAtTime: function () { return { left: 0, top: 0, width: 300, height: 50 }; },
+            property: function () { return mockFxGroup({}); }
+        };
+    }
+    var comp = { width: 1920, height: 1080, frameDuration: 1 / 30, numLayers: 0, duration: 100,
+                 layers: { addNull: function () { return ly(); }, addText: function () { return ly(); } } };
+    var p = { maxSize: 60, normalSize: 40, gap: 145, multiGap: 145, linesPerScroll: 1,
+              maxOpacity: 100, normalOpacity: 30, scrollFrames: 9, pauseFrames: 30,
+              pauseRandom: false, jitterFrames: 10, fitLong: false, align: 1 };
+    SCRIPTS.core.buildLyrics(comp, null, p, "第一句。\n第二句。");
+    return last;   // 最后一次 setValue 的 TextDocument（即最终写回）
+}
+var lastBox = buildLyricsBoxTextWiden();
+assert(lastBox && lastBox.boxTextSize && lastBox.boxTextSize[0] > 1920, "段落文本框写入时宽度放宽至 2*comp.width+200（不自动换行，句号不再被挤到行首）");
+assert(lastBox && lastBox.text === "第二句。", "最终文本正确写入（末句含句号在行尾）");
+
+console.log("== 用例 13: 写入时显式锁定 direction=LTR，源层 RTL/双向方向不再让句号反向（v2.0.13）==");
+sandbox.ParagraphDirection = { DIRECTION_LEFT_TO_RIGHT: "DIRECTION_LTR", DIRECTION_RIGHT_TO_LEFT: "DIRECTION_RTL" };
+// 复用 buildLyrics 写回路径：点文本(无框)+ direction 继承 RTL（"DIRECTION_RTL"）
+function buildLyricsDirLock() {
+    var last = null;
+    function ly() {
+        var tv = { text: "", fontSize: 40, boxText: false, direction: "DIRECTION_RTL" };
+        return {
+            name: "", startTime: 0,
+            transform: { position: { setValue: function () {}, expression: "" },
+                         scale: [100, 100], opacity: { expression: "" },
+                         anchorPoint: { setValue: function () {} } },
+            text: { sourceText: { value: tv, setValue: function (v) { last = v; } } },
+            sourceRectAtTime: function () { return { left: 0, top: 0, width: 300, height: 50 }; },
+            property: function () { return mockFxGroup({}); }
+        };
+    }
+    var comp = { width: 1920, height: 1080, frameDuration: 1 / 30, numLayers: 0, duration: 100,
+                 layers: { addNull: function () { return ly(); }, addText: function () { return ly(); } } };
+    var p = { maxSize: 60, normalSize: 40, gap: 145, multiGap: 145, linesPerScroll: 1,
+              maxOpacity: 100, normalOpacity: 30, scrollFrames: 9, pauseFrames: 30,
+              pauseRandom: false, jitterFrames: 10, fitLong: false, align: 1 };
+    SCRIPTS.core.buildLyrics(comp, null, p, "第一句。\n第二句。");
+    return last;
+}
+var lastDir = buildLyricsDirLock();
+assert(lastDir && lastDir.direction === "DIRECTION_LTR", "源层 RTL direction 被显式锁定为 LTR（句号回到句尾/最右）");
+assert(lastDir && lastDir.text === "第二句。", "文本仍正确写入（含句号）");
 
 console.log("\n===== 结果: " + passed + " 通过, " + failed + " 失败 =====");
 process.exit(failed > 0 ? 1 : 0);

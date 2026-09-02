@@ -1,5 +1,25 @@
 # 更新日志（CHANGELOG）
 
+## v1.3.16
+
+- **滚动歌词 V2** 修复「句号在文本最左/行首,本应在最右」(面板 v2.0.13): 放宽段框宽后仍复现→非换行而是**文本方向(direction)**。根因 = 源图层继承 RTL/双向方向, AE bidi 按从右到左重排, 汉字 LTR 强字符次序不变, 但**句末标点「。」被排到段首(最左)**; 佐证官方 ParagraphDirection 枚举 + 社区「文本反向、引号跑 front」案例 + Reverse-Text 插件价值。修复: applyLyricText 写回显式 `d.direction=LTR` 锁横向。测试 39→41
+
+## v1.3.15
+
+- **滚动歌词 V2** 修复「句号被放到行首」(面板 v2.0.12): 根因 = 源图层是段落(有边框)文本框时, AE 按旧框宽**自动换行**, 中文闭标点(UAX#14)断行落到行首(放大句字号大更易触发)。写入统一走 `applyLyricText`, 检测 `boxText` 则放宽 `boxTextSize=2×comp.width+200` 杜绝换行, 标点留句尾; 点文本源层 boxText=false 不受影响。依据 Adobe 官方「paragraph text box 按边界框宽换行」。测试 37→39
+
+## v1.3.14
+
+- **滚动歌词 V2** 修复左/右对齐下「放大句」不贴边(面板 v2.0.11): 真机选左对齐后当前句(放大句)未贴 30px, 长句放大整体左漂似"句号挤到行首"。根因 = 对齐偏移按 `sourceRectAtTime` 的**未缩放**宽(scale=100%)算, 而锚点在文本中心, 中心缩放会让左/右缘随 scale 漂移。修复: position 内 `w = sourceRect(width)×transform.scale[0]/100`(实时缩放感知), 放大句指定边精确贴边距, 居中不受影响。测试 mock 注入 transform.scale, 断言 35→37
+
+## v1.3.13
+
+- **滚动歌词 V2** 修复「水平对齐不生效」(面板 v2.0.10): 真机选中左/右对齐生成后仍居中。根因 = `buildLyrics` 调用 `buildController` 重建参数对象时漏传 `align`(与 v2.0.3 漏传 lines/multiGap 同类), 致控件走 DEFAULTS 恒为居中。修复补传 + 0..2 clamp。新增用例 11 `buildLyrics→buildController` 透传回归(测试 33→35 断言); 曾只在 `snapshot()` 直测 buildController 绕过 buildLyrics 故未抓到, 教训已记 DEVELOPMENT
+
+## v1.3.12
+
+- **滚动歌词 V2** 新增「水平对齐」(面板 v2.0.9): 歌词支持左对齐 / 居中 / 右对齐(默认居中 = 原行为)。面板下拉选择 + Lyrics_Ctrl「水平对齐」滑块(0/1/2) 实时改; 每句 x = master[0] + 对齐偏移, 偏移用 `sourceRectAtTime(...).width` 求真实文本宽(fitLong 缩窄后也不溢出), 边距 30px; 预设版本 v3→v4 新增短键 `al`(旧预设兼容回退); 模拟测试 28→33 断言(新增 sourceRectAtTime mock + 5 项对齐用例)。真机待用户验证
+
 ## v1.3.11
 
 - **NumCounter** 修复「存储槽位后对应使用按钮不变可用」真正根因(面板 v0.2.9): 槽位索引 0-based/1-based 错位 —— 存储/使用按钮闭包 `idx` 为 0-based 写成 `presetsCache["0".."3"]`, 而全局约定 1-based("1".."4") 致使用按钮读空槽全灰。修复: 闭包 `onClick` 统一传 `idx+1`, 全链路 1-based 对齐(Node 模拟验证)。v0.2.8 的 `pal.layout.layout(true)` 为误诊, 仅作渲染保险

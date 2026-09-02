@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**：2026-08-18（commit `9673f48`）真机验证通过，V2 转稳定 v2.0.8
+> 📌 **文档基线**：2026-09-02（commit 未提交）v2.0.13 修复「句号被放到最左/行首」（源层 RTL/双向方向被 bidi 把句尾标点排到段首 → 写回显式锁 direction=LTR；41 断言）。v2.0.12 修源层段落文本框按旧框宽换行把句号挤到行首（放宽 boxTextSize，39）；v2.0.11 修放大句左/右对齐不贴边（缩放感知，37）；v2.0.10 修 buildLyrics 漏传 align 恒居中（35）。根文档待用户提交后同步
 > **更新文档/代码后，请更新此行**（日期 + 新 commit hash），并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
@@ -30,7 +30,7 @@
 
 ## 常用命令
 
-- 回归测试：`node test_rolling_lyrics_v2.js`（28 断言，**执行真实表达式字符串**：vm 加载 JSX → mock AE → 逐帧求值；改表达式后必须跑）
+- 回归测试：`node test_rolling_lyrics_v2.js`（35 断言，**执行真实表达式字符串**：vm 加载 JSX → mock AE → 逐帧求值；改表达式后必须跑）
 - 语法检查：`cp rolling-lyrics-v2.jsx _c.js && node --check _c.js && rm _c.js`
 - 部署：仓库根 `python install.py`（自动检测 AE 版本 + 补 BOM + 字节校验）
 - 补 BOM：Python 前插 `b'\xef\xbb\xbf'`
