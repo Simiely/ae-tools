@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**：2026-09-01（commit `e391ca5`）NumCounter v0.2.9（修复「存储槽位后对应使用按钮不变可用」真正根因：存储/使用按钮闭包 `idx` 为 0-based(0..3) 写成 `presetsCache["0".."3"]`，而 `presetsCache`/`updateSlotLoadBtns`/`loadSlotsFromStorage`/`importSlots` 全局约定 1-based("1".."4")，致使用按钮读空槽全灰；修复 = 闭包 `onClick` 统一传 `idx+1`，全链路 1-based 对齐，Node 模拟验证 enabled=[true×4]。v0.2.8 的 `pal.layout.layout(true)` 为误诊，仅作渲染保险），根文档同步（四件套保持）
+> 📌 **文档基线**：2026-09-02（commit `dcda074`）滚动歌词 V2 v2.0.13 / 仓库 v1.3.16（水平对齐 左/中/右 + 修复三个"标点/对齐错位"根因：① v2.0.10 buildLyrics 漏传 align 致滑块恒居中；② v2.0.11 放大句左/右对齐不贴边(对齐偏移按未缩放宽、锚点中心、中心缩放漂移→缩放感知 w×scale/100)；③ v2.0.12 源层段落文本框按旧框宽自动换行把句号挤到行首(放宽 boxTextSize)；④ v2.0.13 源层 RTL/双向方向被 bidi 把句尾标点排到行首(写回显式 direction=LTR)。41 断言。根文档已随本轮提交同步）
 > **更新文档/代码后，请更新此行**（日期 + 新 commit hash），并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
