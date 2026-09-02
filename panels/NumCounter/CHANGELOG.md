@@ -1,5 +1,12 @@
 # 更新日志（CHANGELOG）
 
+## 文档同步（2026-09-02 架构描述对齐 odometer 实现 + 明确步进语义, 无行为变更）
+
+- **背景**: v0.2.9 已本地验证可用并推 GitHub; 本轮仅同步文档, 行为不变。
+- **步进语义明确**: `步进`(step) = 显示最小单位 / 吸附粒度, **非每帧必 +1 步长**。数值按帧数连续(线性/缓动)插值, 表达式仅把显示值吸附到最近 step 倍数(`Math.round(val/step)*step`); 节奏由帧数/缓动决定。终点显示值取最近 step 倍数(如 0→97 步进 5 末值显示 95), step=0 则不吸附连续递增。
+- **架构描述对齐**: 面板 README / AGENTS / DEVELOPMENT 此前停留在 v0.1.x 单文本图层 + `buildExpr` 描述; 已校正为 v0.2.0 起的「独立数位 / odometer」架构(`buildSlotExpr` + `数位 N` 独立层 + 控制空对象 `NumCounter 控制`); 测试断言数 19→60(以 `node test_NumCounter.js` 实测 60 通过为准)。
+- **新增文档**: 4 槽位预设(`presetsCache` + 工程目录 `NumCounter.presets.json`, 避开 app.settings)写入 README 特性与 AGENTS 关键坑。
+
 ## v0.2.9（2026-09-01 修复「存储后使用按钮不变可用」真正根因: 槽位索引错位）
 
 - **现象**: 点「存储预设 N」成功后, 对应的「使用预设 N」按钮仍是灰的(不可用)

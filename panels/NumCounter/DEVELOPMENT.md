@@ -9,12 +9,12 @@ NumCounter 是 ae-tools 的新面板(2026-09-01 首发):一键生成「数字从
 ```
 panels/NumCounter/
 ├─ NumCounter.jsx        主面板(ES3, 单文件)
-├─ test_NumCounter.js    纯逻辑层 node 断言(19 项)
+├─ test_NumCounter.js    纯逻辑层 node 断言(60 项, 实测全过)
 ├─ README/AGENTS/CHANGELOG/DEVELOPMENT   四件套
 └─ .gitignore            忽略 _check.js
 ```
 
-生成产物 = 一个文本图层 + 3 个滑块效果(数值/步进/小数位)+「数值」滑块两帧关键帧 + 源文本表达式。表达式按效果序号引用,与添加顺序一致。
+生成产物 = N 个独立数位文本图层(数位 0..N-1, 各带 sourceText 表达式截取自己那一位) + 控制空对象 `NumCounter 控制`(含 数值/步进/小数位 3 滑块)+「数值」滑块两帧关键帧。表达式按效果序号引用,与添加顺序一致。
 
 ## 三、关键问题与方案(一坑一篇)
 
@@ -36,11 +36,11 @@ panels/NumCounter/
 
 ### 问题:表达式与纯函数逻辑重复(两处同步)
 
-**TL;DR**:格式化逻辑既在 `formatNumber`(node 可测)又在 sourceText 表达式(`buildExpr` 拼接)各写一份,改一处易漏另一处。
+**TL;DR**:格式化逻辑既在 `formatNumber`(node 可测)又在 sourceText 表达式(`buildSlotExpr` 拼接)各写一份,改一处易漏另一处。
 
 - 根因:表达式运行在 AE 表达式引擎(ES3),无法 require 本文件,只能拼接字符串复制逻辑。
-- 解决:约定 `formatNumber` 与 `buildExpr` 必须**同步修改**,且 `formatNumber` 进 `test_NumCounter.js` 守护(逻辑一致由测试间接保证 —— 改表达式须手动对照纯函数)。
-- 预防:AI/维护者改格式化时先改 `formatNumber` 跑测试,再按相同逻辑改 `buildExpr`。
+- 解决:约定 `formatNumber` 与 `buildSlotExpr` 必须**同步修改**,且 `formatNumber` 进 `test_NumCounter.js` 守护(逻辑一致由测试间接保证 —— 改表达式须手动对照纯函数)。
+- 预防:AI/维护者改格式化时先改 `formatNumber` 跑测试,再按相同逻辑改 `buildSlotExpr`。
 
 ### 问题:缓动手感未经真机验证
 
