@@ -67,3 +67,4 @@
 - 变更记录 → [CHANGELOG.md](CHANGELOG.md)
 - AI / 维护者规则(技术栈、关键坑、约定) → [AGENTS.md](AGENTS.md)
 - 架构与问题记录(一坑一篇) → [DEVELOPMENT.md](DEVELOPMENT.md)
+- 使用技巧(进阶用法 / 踩坑速查) → [../../tips/tools/NumCounter.md](../../tips/tools/NumCounter.md)

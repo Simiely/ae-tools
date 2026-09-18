@@ -19,7 +19,7 @@ ae-tools/
 
 ## 工具总览
 
-### 自写插件（10）
+### 自写插件（11）
 
 | 工具 | 源码位置 | 类型 | AE 菜单 | 状态 | 原独立仓库 |
 |---|---|---|---|---|---|
@@ -33,12 +33,7 @@ ae-tools/
 | 星空生成器 starry-sky-generator | `panels/starry-sky-generator/` | 面板 | Window > Extensions | 稳定 | Simiely/starry-sky-generator |
 | 快速K帧 QuickKey | `panels/QuickKey/` | 面板 | Window > Extensions | 开发中（v0.3.6，内置 cubic 预设） | 新插件（本仓库首发） |
 | 数字计数器 NumCounter | `panels/NumCounter/` | 面板 | Window > Extensions | v0.2.9（已本地验证，独立数位/odometer + 字体字重两级联动 + 4 槽位预设 + 调试输出区；修复「对象无效」/「数字不动」/「存储后使用按钮不变可用」） | 新插件（本仓库首发） |
-
-### 待开发（WIP，暂不部署）
-
-| 工具 | 说明 |
-|---|---|
-| 山峰频谱 MountainSpectrum | 内容已清理出主目录（2026-08-18），**待开发**，不部署、不安装；源码保留在 `D:\workbuddy\2026-08-12-17-14-47\ae-scripts\MountainSpectrum.jsx` |
+| 山峰频谱 MountainSpectrum | `panels/MountainSpectrum/` | 面板 | Window > Extensions | v0.9.0（已本地验证；等距矩形阵列 + 一个波峰一组 3 个可拖控制点(峰/左边缘/右边缘) + 总闸统一高度 + 4 槽预设；1131 断言） | 新插件（本仓库首发） |
 
 ### 收集的脚本（1）
 
