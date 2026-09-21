@@ -150,8 +150,12 @@ function pureH(i, points, opts) {
 function exprH(i, points, opts) {
     var o = opts || {};
     var code = T.buildSizeExpr(i, NN, points.length);
-    return evalExpr(code, mkThisComp([ROWX, ROWY], mkCtrlFx(o),
-        points, o.hMax != null ? ROWY - o.hMax : null), [ROWX, ROWY], NM.outSize)[1];
+    // v1.5.7: 控制器位置与柱图层位置可分离 —— 基准取自控制器, 柱位置只影响视觉位置。
+    //   用 ctrlPos/barPos 分别覆盖, 就能模拟"给柱设父级(AE 会补偿其 position)"这一幕。
+    var ctrlPos = o.ctrlPos || [ROWX, ROWY];
+    var barPos  = o.barPos  || [ROWX, ROWY];
+    return evalExpr(code, mkThisComp(ctrlPos, mkCtrlFx(o),
+        points, o.hMax != null ? ctrlPos[1] - o.hMax : null), barPos, NM.outSize)[1];
 }
 function countPx(points, opts) {
     var c = 0, i;
@@ -426,7 +430,10 @@ cur = "七、形状图层可拖动(回归)";
 var posExpr = T.buildPosExpr(0, 2, 1);
 eq("位置表达式不含抵消图层位置的写法", posExpr.indexOf("bx - transform.position[0]") < 0, true);
 eq("位置表达式输出纯偏移", posExpr.indexOf("var outPos = [(i - (N - 1) / 2) * (W + G), -h / 2];") >= 0, true);
-eq("核心用图层自身 X 定位柱子", T.buildExprCore(0, 2, 1).indexOf("transform.position[0] + (i - (N - 1) / 2) * pitch") >= 0, true);
+// ⚠️ 原断言写的是 indexOf("transform.position[0] + ...") —— v1.5.7 把基准改成
+//   "c.transform.position[0] + ..." 之后【它照样通过】(子串仍匹配), 属漏网的弱断言。
+//   改成带 c. 前缀的完整串, 才能真正钉住"基准取自控制器"。
+eq("核心用【控制器】X 作为整行基准(v1.5.7)", T.buildExprCore(0, 2, 1).indexOf("var bx = c.transform.position[0] + (i - (N - 1) / 2) * pitch") >= 0, true);
 var pv0 = evalExpr(T.buildPosExpr(2, 2, 1), mkThisComp([ROWX, ROWY], mkCtrlFx({}), [pt(PX1, { rl: 170, rr: 170 })]), [ROWX, ROWY], NM.outPos);
 var pv1 = evalExpr(T.buildPosExpr(2, 2, 1), mkThisComp([ROWX, ROWY], mkCtrlFx({}), [pt(PX1, { rl: 170, rr: 170 })]), [ROWX + 200, ROWY], NM.outPos);
 near("图层右移 200 -> 输出偏移不变(X 无关)", pv1[0] - pv0[0], 0, 1e-12);
@@ -1052,6 +1059,65 @@ for (var ej = 0; ej < EDGE_POINT.length; ej++) { edgeRun(EDGE_POINT[ej][0], EDGE
 eq("边界值逐根等价: " + (EDGE_PARAM.length + EDGE_POINT.length) + " 用例 × " + NN + " 根 = " + etot + " 组比对全一致" +
    (ebad ? ("(首处分叉: " + efirst + ")") : ""), ebad, 0);
 eq("边界用例数 = 25(防止用例被误删)", EDGE_PARAM.length + EDGE_POINT.length, 25);
+
+// ============================================================
+cur = "十三、柱图层设父级 / 拖动不再影响形状(v1.5.7)";
+// ============================================================
+// 用户需求:「希望控制点的位置不变, 也能有效果」——
+//   给「山峰 柱」设父级让整座山跟随运动, 而峰点(控制点)留在原位不动, 山形要保持。
+//   前提: 山形是由【控制点】决定的, 所以控制点不动 → 形状就该不变。
+//
+// 根因: 基准 X/Y 原先取自【柱图层自身的 transform.position】。
+//   在 AE 里给图层设父级时, AE 会【补偿】该值(改写它以保持视觉位置) → 基准跟着漂 →
+//   与峰点坐标(未设父级, 仍是合成坐标)差一个父级偏移 → 山形散掉。
+//   实测(40 根取样): 只有柱的坐标系平移 → 33/40 根高度改变。
+//
+// 修法: 基准改用【控制器位置】(c.transform.position) —— 空对象, 不跟随运动,
+//   于是基准与峰点恒在同一坐标系 → 柱图层可自由设父级, 形状由控制点唯一决定。
+//
+// 本节钉三件事: ① 柱位置变化不影响形状 ② 基准确实来自控制器 ③ 控制器变化会改变形状
+{
+    var pts13 = [pt(PX1, { rl: 170, rr: 170 }), pt(PX2, { rl: 240, rr: 240 })];
+    function sigAt(ctrlPos, barPos) {
+        var out = [];
+        for (var q = 0; q < NN; q++) {
+            out.push(Number(exprH(q, pts13, { ctrlPos: ctrlPos, barPos: barPos })).toFixed(6));
+        }
+        return out.join(",");
+    }
+    var base13 = sigAt([ROWX, ROWY], [ROWX, ROWY]);
+    eq("基准场景本身有起伏(防止全平导致的假绿)",
+       (function () { var a = base13.split(","); var mx = Math.max.apply(null, a), mn = Math.min.apply(null, a); return Number(mx) - Number(mn) > 1; })(), true);
+
+    // ① 核心: 柱图层位置变了(等价于"设父级后被 AE 补偿"), 形状必须逐位不变
+    eq("柱图层位置平移 (+300,-200) → 40 根高度逐位不变(设父级不再毁掉山形)",
+       sigAt([ROWX, ROWY], [ROWX + 300, ROWY - 200]) === base13, true);
+    eq("柱图层位置反向平移 (-500,+120) → 同样逐位不变",
+       sigAt([ROWX, ROWY], [ROWX - 500, ROWY + 120]) === base13, true);
+
+    // ② 基准确实来自控制器: 控制器移动(柱/峰点都不动)必须改变形状
+    eq("控制器位置平移 → 形状随之改变(证明基准取自控制器而非本图层)",
+       sigAt([ROWX + 300, ROWY], [ROWX, ROWY]) !== base13, true);
+
+    // ③ 柱位置与"基线 Y"无关: 只有柱的 Y 变化, 形状不变
+    eq("只有柱的 Y 变化 → 形状不变(基线 Y 也取自控制器)",
+       sigAt([ROWX, ROWY], [ROWX, ROWY + 400]) === base13, true);
+    eq("控制器 Y 变化 → 形状改变(hMax / 峰高基线随控制器)",
+       sigAt([ROWX, ROWY + 400], [ROWX, ROWY]) !== base13, true);
+}
+
+// 源码级体检: 基准四处必须取自控制器, 且不得再有裸的 transform.position 基准
+{
+    var core13 = T.buildExprCore(0, 2, 1);
+    eq("基准 X 取自控制器", core13.indexOf("var bx = c.transform.position[0]") >= 0, true);
+    eq("总闸基线 Y 取自控制器", core13.indexOf("hMax = c.transform.position[1]") >= 0, true);
+    eq("峰高基线 Y 取自控制器(总闸循环)", core13.indexOf("pk2 = c.transform.position[1]") >= 0, true);
+    eq("峰高基线 Y 取自控制器(主循环)", core13.indexOf("pk = c.transform.position[1]") >= 0, true);
+    eq("不再有裸的基准 transform.position[0]/[1](会被父级带走)",
+       /(var bx = transform\.position\[0\]|[^.]transform\.position\[1\] - )/.test(core13), false);
+    eq("峰点/缘点仍读各自坐标(它们不设父级, 留在合成坐标系)",
+       core13.indexOf("pp = P.transform.position;") >= 0 && core13.indexOf("EL.transform.position[0]") >= 0, true);
+}
 
 // ============================================================
 console.log("---------------------------------------------");
