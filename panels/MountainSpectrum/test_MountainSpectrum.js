@@ -1,4 +1,4 @@
-// MountainSpectrum 断言测试(node 直接跑: node test_MountainSpectrum.js)
+﻿// MountainSpectrum 断言测试(node 直接跑: node test_MountainSpectrum.js)
 //
 // 运行方式(必须在本目录内, 脚本会相对路径载入主文件):
 //     node test_MountainSpectrum.js
@@ -949,6 +949,109 @@ eq("版本号三处一致(文件头 / VER 常量 / CHANGELOG 顶部标题)", (fu
 })(), true);
 eq("版本号无硬编码残留(诊断输出必须走 VER 常量)", raw.indexOf('diag("脚本版本: 1.5.') < 0 &&
     raw.indexOf('diag("面板已加载 v1.5.') < 0, true);
+
+// 版本号上界面 + 「点生成没反应」修复(⭐ v1.5.4 需求:「点击生成 没反应。版本号 需要显示在 ui面板上」)
+eq("面板顶部常驻版本号标签, 且引用 VER 常量(不硬编码)",
+    srcR.indexOf('pal.add("statictext", undefined, "山峰频谱 MountainSpectrum   v" + VER)') >= 0, true);
+eq("状态栏初始文案带版本号",
+    srcR.indexOf('"就绪 · v" + VER + " — 先在时间轴里点选一个合成') >= 0, true);
+eq("未激活合成统一走 needCompAlert() 弹窗, 且入口 >= 5 个(生成/均分/重设/随机/清理)", (function () {
+    if (srcR.indexOf("function needCompAlert()") < 0) { return false; }
+    var n = (srcR.match(/needCompAlert\(\);/g) || []).length;
+    return n >= 5;
+})(), true);
+eq("点「生成 / 重建」立刻写「正在生成…」状态(点击即有可见反馈)",
+    srcR.indexOf('setStatus(pal, "正在生成…", C_OK);') >= 0, true);
+
+// 提示区/调试区固定行数 + 滚动条(⭐ v1.5.5 需求:「需要换成有右侧进度条的设计, 8 行左右就够」)
+eq("提示区走 fixedBox(固定 8 行 + 多行文本框), 不再是 statictext",
+    srcR.indexOf('var tipBox = fixedBox(pal, 320, 8, TIP_TEXT, true);') >= 0 &&
+    srcR.indexOf('var tip = pal.add("statictext"') < 0, true);
+eq("调试输出区也走 fixedBox(修 pinW 吃掉高度的老坑)",
+    srcR.indexOf('pal.debugBox = fixedBox(dbgPanel, 320, 8, "", true);') >= 0, true);
+eq("文本框开启 scrollable(右侧滚动条)", srcR.indexOf("multiline: true, scrollable: true, readonly: !!readonly") >= 0, true);
+eq("提示文本显式分段(\\n >= 10 处, 不靠自动折行)", (function () {
+    var m = srcR.match(/var TIP_TEXT =[\s\S]*?;\r?\n/);
+    if (!m) { return false; }
+    return (m[0].match(/\\n/g) || []).length >= 10;
+})(), true);
+eq("fixedBox 顺序体检: pinW 钉宽度必须早于设置高度(顺序反了会被静默覆盖)", (function () {
+    // ⚠️ 必须取【整个函数体】, 不能用固定字符窗口 —— v1.5.5 实测: 只加了几行注释(800 窗口取不到
+    //    pinW), 断言就假红。体检断言本身也会因"代码变长"而失效, 这是同类坑的第二次出现。
+    var m = srcR.match(/function fixedBox\([\s\S]*?\r?\n    \}/);
+    if (!m) { return false; }
+    var seg = m[0];
+    var p = seg.indexOf("pinW(box, w)");
+    var h = seg.indexOf("box.preferredSize = [w, h]");
+    return p >= 0 && h >= 0 && p < h;
+})(), true);
+
+// ============================================================
+cur = "十二、边界值等价性(审计发现 ftype 分叉的回归)";
+// ============================================================
+// 来源: 2026-09-21 架构审计用 _audit/boundary.js 探测「纯函数 ↔ 表达式」在【边界值】上的分叉,
+//   发现 ftype 非法枚举值(9 / 3.5)下两侧结论不同 —— 纯函数落「默认分支 = 余弦」、
+//   表达式落「else = 二次」, 40 根里 8 根不一致(拖控制器上的「起伏曲线」滑块出界时,
+//   画面按二次渲染、状态栏回报的可见根数却按余弦算)。
+//   v1.5.6 两侧统一「先 Math.round 再夹到 [0,3], 越界/NaN 回退 0」后分叉消失。
+//   ⭐ 本节把那次探测的 25 个边界用例固化 —— 以后任何一侧改动都会在这里变红,
+//   不再只靠「正常区间」用例兜着(第六节覆盖的 ftype 只有 0~3)。
+eq("normalizeFalloffType 已导出", typeof T.normalizeFalloffType, "function");
+eq("normalizeFalloffType: 0..3 原样通过",
+    [T.normalizeFalloffType(0), T.normalizeFalloffType(1), T.normalizeFalloffType(2), T.normalizeFalloffType(3)].join(","), "0,1,2,3");
+eq("normalizeFalloffType: 越界 / 负数 / NaN 一律回退 0",
+    [T.normalizeFalloffType(9), T.normalizeFalloffType(-1), T.normalizeFalloffType(3.5), T.normalizeFalloffType(NaN)].join(","), "0,0,0,0");
+eq("normalizeFalloffType: 就近取整(0.4→0, 1.4→1, 2.6→3)",
+    [T.normalizeFalloffType(0.4), T.normalizeFalloffType(1.4), T.normalizeFalloffType(2.6)].join(","), "0,1,3");
+eq("falloff 对非法 type 与 type=0 完全等价", T.falloff(0.5, 9) === T.falloff(0.5, 0), true);
+
+var EDGE_PARAM = [
+    ["hMax = 0 (总闸压平)",        { hMax: 0 }],
+    ["hMax = 0.0001 (极小)",       { hMax: 0.0001 }],
+    ["hMax 负值(无效输入)",        { hMax: -50 }],
+    ["baseH = -100 (负地板)",      { baseH: -100 }],
+    ["edge = -50 (越界下)",        { edge: -50 }],
+    ["edge = 150 (越界上)",        { edge: 150 }],
+    ["edge = 0 (纯 Hann)",         { edge: 0 }],
+    ["fw = 0 (硬边界)",            { fw: 0 }],
+    ["fw = 50 (上限)",             { fw: 50 }],
+    ["rhy.interval = 0 (非法)",    { rhy: { on: 1, interval: 0, ratioPct: 180 } }],
+    ["rhy.ratioPct = 0",           { rhy: { on: 1, interval: 8, ratioPct: 0 } }],
+    ["rhy.ratioPct = 1000 (越界)", { rhy: { on: 1, interval: 8, ratioPct: 1000 } }],
+    ["rhy.interval = 1000 > 根数", { rhy: { on: 1, interval: 1000, ratioPct: 180 } }],
+    ["mode = 9 (非法枚举)",        { mode: 9 }],
+    ["ftype = 9 (非法枚举) ⭐",     { ftype: 9 }],
+    ["ftype = -1 (负数)",          { ftype: -1 }]
+];
+var EDGE_POINT = [
+    ["半径 rl=rr=0 (关两侧)",     [pt(PX1, { rl: 0, rr: 0 })], {}],
+    ["半径 rl=rr=0 且带 fw",      [pt(PX1, { rl: 0, rr: 0 })], { fw: 3 }],
+    ["点位在基线下方 (peak<=0)",   [{ x: PX1, y: ROWY + 100, h: 0, xl: PX1 - 170, xr: PX1 + 170 }], {}],
+    ["点位 h 显式 = 0 (自动)",     [pt(PX1, { rl: 170, rr: 170, h: 0 })], {}],
+    ["点位 h 显式 = 1 (极小)",     [pt(PX1, { rl: 170, rr: 170, h: 1 })], {}],
+    ["点位 h=5 但 baseH=40",      [pt(PX1, { rl: 170, rr: 170, h: 5 })], { baseH: 40 }],
+    ["不对称 rl=1000 rr=1",       [pt(PX1, { rl: 1000, rr: 1 })], {}],
+    ["双点完全重合",               [pt(PX1, { rl: 170, rr: 170 }), pt(PX1, { rl: 170, rr: 170 })], {}],
+    ["fw=3 + edge=0 + 节奏开",     [pt(PX1, { rl: 170, rr: 170 })], { fw: 3, edge: 0, rhy: { on: 1, interval: 8, ratioPct: 180 } }]
+];
+var ebad = 0, etot = 0, efirst = "";
+function edgeRun(tag, pts, opts) {
+    for (var i = 0; i < NN; i++) {
+        etot++;
+        var a, b;
+        try { a = pureH(i, pts, opts); } catch (eA) { a = "ERR:" + eA.message; }
+        try { b = exprH(i, pts, opts); } catch (eB) { b = "ERR:" + eB.message; }
+        var ok;
+        if (typeof a === "number" && typeof b === "number") { ok = Math.abs(a - b) <= 1e-6; }
+        else { ok = String(a) === String(b); }
+        if (!ok) { ebad++; if (!efirst) { efirst = tag + " 柱" + i + " 纯=" + a + " 式=" + b; } }
+    }
+}
+for (var ei = 0; ei < EDGE_PARAM.length; ei++) { edgeRun(EDGE_PARAM[ei][0], [pt(PX1, { rl: 170, rr: 170 })], EDGE_PARAM[ei][1]); }
+for (var ej = 0; ej < EDGE_POINT.length; ej++) { edgeRun(EDGE_POINT[ej][0], EDGE_POINT[ej][1], EDGE_POINT[ej][2]); }
+eq("边界值逐根等价: " + (EDGE_PARAM.length + EDGE_POINT.length) + " 用例 × " + NN + " 根 = " + etot + " 组比对全一致" +
+   (ebad ? ("(首处分叉: " + efirst + ")") : ""), ebad, 0);
+eq("边界用例数 = 25(防止用例被误删)", EDGE_PARAM.length + EDGE_POINT.length, 25);
 
 // ============================================================
 console.log("---------------------------------------------");

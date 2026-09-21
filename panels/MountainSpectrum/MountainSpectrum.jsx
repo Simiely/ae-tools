@@ -1,6 +1,6 @@
 ﻿// ============================================================
 // 山峰频谱  MountainSpectrum.jsx
-// 版本: 1.5.3  (2026-09-20)
+// 版本: 1.5.6  (2026-09-21)
 // 适用: After Effects 2015.3+ 至 2026 (ExtendScript / ScriptUI)
 //
 // 功能:
@@ -50,6 +50,35 @@
 //   ② 基础高度是【加法基线】而不是"钳制上限": 柱子高度 = 基础高度 + 超出量。
 //      负的基础高度一律按 0 处理(控制器滑块能被拖成负数; 不钳会算出负高度 -> 矩形翻转渲染)。
 //
+// v1.5.6 修「起伏曲线」枚举越界分叉(架构审计实测发现, 不是推测):
+//   - 现象: ftype = 9(或 3.5)时, 纯函数落「默认分支 = 余弦」、表达式落「else = 二次」——
+//     控制器上的「起伏曲线」是 AE 原生数值滑块, 能拖出 0~3 的范围;
+//     一出界, 画面按二次曲线渲染、状态栏回报的可见根数却按余弦算, 数字与画面对不上
+//     (审计实测 40 根里 8 根不一致)。
+//   - 修法: 两侧统一【先 Math.round 再夹到 [0,3]】, 越界/NaN 一律回退 0(余弦 = 面板默认值)。
+//     纯函数走 normalizeFalloffType(), 表达式内联同一规则。
+//   - ⚠️ 唯一的行为变化: ftype ∈ [3.5, +∞) 从「二次」变为「余弦」(非法值回退默认)。
+
+// v1.5.5 提示区改「固定 8 行 + 右侧滚动条」(用户反馈:「预设管理和状态之间显示的内容需要换行,
+//         现在的可读性太差。空间占用太多, 需要改成有右侧进度条的设计。窗口的高度可以显示 8 行
+//         左右的文字就够了, 其他的可以滚动进度条」):
+//   - 那段提示由 statictext 换成多行 edittext { multiline, scrollable, readonly }:
+//     高度锁 8 行(LINE_H × 8), 超出部分走右侧滚动条 —— 面板总高不再被文字撑开;
+//     文本改为【显式 \n 分段】而不是靠自动折行, 一段一条信息, 可读性优先。
+//   - 顺手修一个长期存在的尺寸坑: pinW() 内部会把 preferredSize 重置成 [w, -1]
+//     (高度=自适应), 所以"先设高度再 pinW"是【无效】的 —— 这正是此前「调试输出区」
+//     preferredSize=[320,110] 被吃掉、内容一多就把面板撑高的原因。
+//     新辅助函数 fixedBox() 明确【先 pinW 钉宽度, 再单独钉高度】, 两个文本框统一走它。
+
+// v1.5.4 版本可见 + 修「点生成没反应」(用户反馈:「点击生成 没反应。版本号 需要显示在 ui面板上」):
+//   ① 面板顶部常驻显示版本号, 状态栏初始文案也带版本 —— 为什么必须: ScriptUI Panel 由
+//      AE【启动时】载入, 改完脚本不重启 AE 跑的还是旧版; 没有版本号就无法判断"面板是不是
+//      新的", 只能把旧版的报错当成新代码的 bug 反复排查(实测踩过: AE 比脚本早启动 33 分钟,
+//      它报的"行 2069"属于那份旧文件, 与磁盘上的代码无关)。
+//   ② 「未激活合成」从"只写状态栏"改为"状态栏 + 弹窗": 状态栏在面板最底部极易被忽略,
+//      用户看到的现象正是"点生成没反应"。按本仓库规范, 前置条件值得弹窗。
+//   ③ 点「生成 / 重建」立刻在状态栏写"正在生成…", 点击即有可见反馈。
+
 // v1.5.3 默认颜色可见化(用户需求:「默认颜色需要修改为白色ffffff」):
 //   - 生成链路的默认值本就是 [1,1,1,1] = #FFFFFF, 无需改值;
 //   - 但按钮初始文字是「选色…」, 不打开工程看不到默认色 -> 初始文字直接显示「#FFFFFF」,
@@ -459,7 +488,7 @@
 
     var FILL_COLOR = [1, 1, 1, 1];           // v1.5.1 默认白色 (4D RGBA, 必须 4 个分量); 可在面板取色器里改
     // 版本号单一真相: 文件头注释 + 两处诊断输出都以此为准(测试断言三者一致, 防止再漏改)
-    var VER = "1.5.3";
+    var VER = "1.5.6";
     var MAX_BARS   = 400;
     var MAX_POINTS = 60;
 
@@ -500,9 +529,21 @@
     }
 
     // 起伏曲线: t = 距离 / 影响范围 (t=0 在点上 → 1, t>=1 无影响 → 0)
+    // v1.5.6: 起伏曲线的枚举值先【归一化】再匹配 —— 修架构审计实测发现的分叉。
+    //   分叉现场: ftype = 9 / 3.5 时纯函数落「默认分支 = 余弦」, 表达式落「else = 二次」。
+    //   触发路径真实: 控制器上的「起伏曲线」是 AE 原生数值滑块, 能拖出 0~3 的范围;
+    //   一出界, 画面(表达式)与状态栏可见根数(纯函数)就对不上。
+    //   统一口径: Math.round 后夹到 [0,3]; 越界 / NaN 回退 0(余弦 = 面板默认值)。
+    function normalizeFalloffType(type) {
+        var n = Math.round(type);
+        if (!(n >= 0 && n <= 3)) { return 0; }
+        return n;
+    }
+
     function falloff(t, type) {
         if (t >= 1) return 0;
         if (t <= 0) return 1;
+        type = normalizeFalloffType(type);
         if (type === 1) { return (Math.exp(-4.5 * t * t) - GAUSS_LO) / GAUSS_SPAN; }
         if (type === 2) { return 1 - t; }
         if (type === 3) { var u = 1 - t; return u * u; }
@@ -854,6 +895,10 @@
         L.push("if (baseH < 0) { baseH = 0; }");
         L.push("var mode = c.effect(\"" + SL_MODE + "\")(1);");
         L.push("var ftype = c.effect(\"" + SL_FTYPE + "\")(1);");
+        // v1.5.6: 与纯函数 normalizeFalloffType 严格镜像 —— 枚举值先取整再夹到 [0,3], 越界/NaN 回退 0。
+        //   不夹的话滑块拖出界时表达式走"else = 二次", 与纯函数(默认分支 = 余弦)分叉。
+        L.push("var ftp = Math.round(ftype);");
+        L.push("if (!(ftp >= 0 && ftp <= 3)) { ftp = 0; }");
         L.push("var edge = " + EDGE_DEF + ";");
         L.push("try { edge = c.effect(\"" + SL_EDGE + "\")(1); } catch (e5) { edge = " + EDGE_DEF + "; }");
         L.push("if (edge > 100) { edge = 100; }");
@@ -970,9 +1015,9 @@
         L.push("        vC = 0;");
         L.push("        vB = 0;");
         L.push("        if (t <= 1) {");
-        L.push("          if (ftype < 0.5) { f = 0.5 * (1 + Math.cos(Math.PI * t)); }");
-        L.push("          else if (ftype < 1.5) { f = (Math.exp(-4.5 * t * t) - " + GAUSS_LO + ") / " + GAUSS_SPAN + "; }");
-        L.push("          else if (ftype < 2.5) { f = 1 - t; }");
+        L.push("          if (ftp < 0.5) { f = 0.5 * (1 + Math.cos(Math.PI * t)); }");
+        L.push("          else if (ftp < 1.5) { f = (Math.exp(-4.5 * t * t) - " + GAUSS_LO + ") / " + GAUSS_SPAN + "; }");
+        L.push("          else if (ftp < 2.5) { f = 1 - t; }");
         L.push("          else { f = (1 - t) * (1 - t); }");
         L.push("          f = edge + (1 - edge) * f;");
         L.push("          if (eff > 0) { vC = eff * f; }");
@@ -1217,6 +1262,7 @@
         if (typeof module !== "undefined" && module.exports) {
             module.exports = {
                 clampNum: clampNum, clampInt: clampInt, falloff: falloff,
+                normalizeFalloffType: normalizeFalloffType,
                 pickBaseY: pickBaseY,
                 barOffsetX: barOffsetX, rowWidth: rowWidth, autoCount: autoCount,
                 pointContribution: pointContribution, pointBand: pointBand, combineHeights: combineHeights,
@@ -1346,6 +1392,17 @@
         var item = app.project ? app.project.activeItem : null;
         if (!item || !(item instanceof CompItem)) return null;
         return item;
+    }
+
+    // v1.5.4: 「未激活合成」统一弹窗提示。
+    //   为什么必须弹窗: 状态栏在面板最底部, 极易被忽略 —— 用户看到的现象就是"点按钮没反应"。
+    //   本仓库规范(AGENTS.md): 操作结果走状态栏, 但"未激活合成"这类【前置条件】值得弹窗。
+    //   ⚠️ 弹窗是模态的, 期间 AE 会拒绝 scheduleTask 轮询(报"当模式对话框正在等待回应时,
+    //      无法运行脚本") —— 用户关掉弹窗即恢复, 属已知取舍, 换取"点了有反应"。
+    function needCompAlert() {
+        try {
+            alert("请先在时间轴里激活一个合成(在时间轴面板里点一下该合成), 再操作。");
+        } catch (eNC) {}
     }
 
     function findLayer(comp, name) {
@@ -1650,9 +1707,11 @@
         try {
             var comp = getComp();
             if (!comp) {
-                setStatus(pal, "请先在时间轴里激活一个合成, 再点生成。", C_WARN);
+                setStatus(pal, "⚠ 请先在时间轴里激活一个合成, 再点「生成 / 重建」。", C_WARN);
+                needCompAlert();
                 return;
             }
+            setStatus(pal, "正在生成…", C_OK);
             var p = readParams(U, comp);
             // 诊断: 参数快照(出问题时反馈这段就能定位"面板读到了什么")
             diag("合成: " + comp.name + "  " + comp.width + "x" + comp.height);
@@ -1849,7 +1908,11 @@
         var step = "均分边缘点";
         try {
             var comp = getComp();
-            if (!comp) { setStatus(pal, "请先在时间轴里激活一个合成。", C_WARN); return; }
+            if (!comp) {
+                setStatus(pal, "⚠ 请先在时间轴里激活一个合成。", C_WARN);
+                needCompAlert();
+                return;
+            }
             var bars = findLayer(comp, LAYER_BARS);
             if (!bars) { setStatus(pal, "还没有生成, 请先点「生成 / 重建」。", C_WARN); return; }
             var N = countBars(bars);
@@ -1894,7 +1957,11 @@
         var step = "读取参数";
         try {
             var comp = getComp();
-            if (!comp) { setStatus(pal, "请先在时间轴里激活一个合成。", C_WARN); return; }
+            if (!comp) {
+                setStatus(pal, "⚠ 请先在时间轴里激活一个合成。", C_WARN);
+                needCompAlert();
+                return;
+            }
             var bars = findLayer(comp, LAYER_BARS);
             if (!bars) { setStatus(pal, "还没有生成, 请先点「生成 / 重建」。", C_WARN); return; }
             var N = countBars(bars);
@@ -1977,7 +2044,8 @@
         try {
             var comp = getComp();
             if (!comp) {
-                setStatus(pal, "请先在时间轴里激活一个合成。", C_WARN);
+                setStatus(pal, "⚠ 请先在时间轴里激活一个合成。", C_WARN);
+                needCompAlert();
                 return;
             }
             // 基线 = 形状图层「山峰 柱」的实际 Y, 取不到才回退面板值
@@ -2012,7 +2080,8 @@
         try {
             var comp = getComp();
             if (!comp) {
-                setStatus(pal, "请先在时间轴里激活一个合成。", C_WARN);
+                setStatus(pal, "⚠ 请先在时间轴里激活一个合成。", C_WARN);
+                needCompAlert();
                 return;
             }
             app.beginUndoGroup("山峰频谱:清理");
@@ -2356,6 +2425,32 @@
         return e;
     }
 
+    // v1.5.5: 多行文本框 —— 【固定行数 + 右侧滚动条】。
+    //   ⚠️ 顺序不能反: pinW() 内部会把 preferredSize 重置成 [w, -1](高度=自适应),
+    //      所以"先设高度、再调用 pinW"会被静默覆盖 —— 必须【先 pinW 钉宽度, 再单独钉高度】。
+    //   rows 是"可见行数", 配 { scrollable: true } 后超出的内容走垂直滚动条, 面板总高恒定。
+    var LINE_H = 17;   // 单行像素高(默认 dialog 字体的经验值)
+    function fixedBox(parent, w, rows, text, readonly) {
+        // ⚠️ scrollable 做【存在性回退】: 本仓库有先例(v1.5.1 的 colorpicker 在 AE 的
+        //    ScriptUI Panels 宿主里直接报 "UI element type ... is unknown or invalid in this
+        //    context")。若某版本 AE 不认 scrollable, 退化成普通多行框(仍固定高度, 内容超出
+        //    时可用键盘/光标滚动), 绝不让面板整个打不开。
+        var box;
+        try {
+            box = parent.add("edittext", undefined, text || "",
+                { multiline: true, scrollable: true, readonly: !!readonly });
+        } catch (eScroll) {
+            box = parent.add("edittext", undefined, text || "",
+                { multiline: true, readonly: !!readonly });
+        }
+        var h = Math.round(rows * LINE_H);
+        pinW(box, w);                                        // 第一步: 钉宽度(会重置高度)
+        try { box.preferredSize = [w, h]; } catch (e1) {}    // 第二步: 再钉高度
+        try { box.minimumSize = [w, h]; } catch (e2) {}
+        try { box.maximumSize = [w, h]; } catch (e3) {}
+        return box;
+    }
+
     // ---------- UI 层(v1.0.0: 控件由参数表生成) ----------
     // 三个分组(排列 / 高度 / 起伏), 组内每行放哪些参数由 UI_ROWS 指定。
     // 加参数只需两步: ① PARAM_SPECS 里加一行 ② 在 UI_ROWS 里挑个位置 ——
@@ -2370,6 +2465,14 @@
     pal.margins = 12;
 
     var U = {};
+
+    // 版本号常驻显示(v1.5.4, 用户需求:「版本号 需要显示在 ui面板上」)
+    //   ⚠️ 这不是装饰: ScriptUI Panel 是【AE 启动时】载入的, 改完脚本不重启 AE,
+    //   面板里跑的还是旧版。没有版本号, 用户就无法判断"这个面板到底是不是新的",
+    //   只能把旧版的报错当成新代码的 bug 反复排查(2026-09-21 实测: AE 比脚本早启动 33 分钟)。
+    var verLbl = pal.add("statictext", undefined, "山峰频谱 MountainSpectrum   v" + VER);
+    verLbl.alignment = ["fill", "center"];
+    try { verLbl.graphics.font = ScriptUI.newFont("dialog", "BOLD", 12); } catch (eVer) {}
 
     var UI_GROUPS = ["排列", "高度", "节奏", "起伏"];
     var UI_ROWS = [
@@ -2533,24 +2636,29 @@
     var btnSlotImp = ioRow.add("button", undefined, "导入配置");
     btnSlotImp.onClick = safeRun("导入配置", function () { importSlots(pal); });
 
-    // 提示
-    var tip = pal.add("statictext", undefined,
-        "【宽度】拖「山峰点 k【左缘】」「山峰点 k【右缘】」两个空对象 —— 拖哪个改哪一侧, 两边可以不同宽(左缓右陡)。"
-        + "删掉某一侧 = 该侧退回自动宽度;「均分边缘点」= 一键回到自动宽度。"
-        + "一个波峰 = 一组 3 个控制点(峰 + 左 + 右), M 个波峰 = M 组。"
-        + "【改完立即生效】矩形宽 / 间距 / 基础高度 / 基线% / 起伏曲线 / 叠加方式 / 点位高度 / 边缘高度%"
-        + "(点位高度 0 = 自动跟随点位 Y; 边缘高度% = 窗口最边缘那根保留【地板之上可用高度】的百分比)。"
-        + "【需重新生成】数量 / 自动铺满 / 点数 —— 结构性参数, 改完会提示。"
-        + "【最高高度】拖「山峰 总高度闸」空对象: 它离基线多高, 整排最高柱就多高, 其余各峰等比缩放(形状不变);"
-        + "拖到基线 = 整排压平; 删掉这一层 = 关闭总闸。"
-        + "状态栏回报【实际可见根数 | 最高高度】。行位置 = 拖「山峰 柱」图层。", { multiline: true });
-    pinW(tip, 320);
+    // 提示(v1.5.5): statictext -> 「固定 8 行 + 右侧滚动条」的多行文本框。
+    //   原因: 原来一大坨静态文字既不好读、又会把面板撑得过高(用户反馈原文见文件头 v1.5.5)。
+    //   文本用【显式 \n 分段】, 一段一条信息 —— 可读性优先, 不依赖自动折行。
+    var TIP_TEXT =
+        "【宽度】拖「山峰点 k【左缘】」「山峰点 k【右缘】」—— 拖哪个改哪一侧, 两边可不同宽(左缓右陡)。\n"
+        + "    删掉某一侧 = 该侧退回自动宽度;「均分边缘点」= 一键回到自动宽度。\n"
+        + "    一个波峰 = 一组 3 个控制点(峰 + 左缘 + 右缘), M 个波峰 = M 组。\n"
+        + "【总高度】拖「山峰 总高度闸」: 它离基线多高, 整排最高柱就多高, 其余各峰等比缩放(形状不变)。\n"
+        + "    拖到基线 = 整排压平; 删掉这一层 = 关闭总闸, 回到各点位自己的高度。\n"
+        + "【行位置】拖「山峰 柱」图层 = 移动整行(它的位置就是行中心 X / 基线 Y)。\n"
+        + "【改完立即生效】矩形宽 / 间距 / 基础高度 / 基线% / 起伏曲线 / 叠加方式 / 点位高度 / 边缘高度%。\n"
+        + "    点位高度 0 = 自动跟随点位 Y; 边缘高度% = 窗口最边缘那根保留【地板之上可用高度】的百分比。\n"
+        + "【需重新生成】数量 / 自动铺满 / 点数 —— 结构性参数, 改完会明确提示。\n"
+        + "【状态栏】回报【实际可见根数 | 最高高度】。\n"
+        + "【面板顶部】显示脚本版本号 —— AE 只在【启动时】载入脚本, 改完代码不重启 AE 面板还是旧版,\n"
+        + "    靠这个版本号判断 AE 里跑的是不是最新的。";
+    var tipBox = fixedBox(pal, 320, 8, TIP_TEXT, true);
 
     // 状态
     var sp = pal.add("panel", undefined, "状态");
     sp.alignChildren = "fill";
     pal.status = sp.add("statictext", undefined,
-        "就绪 — 打开合成后点「生成 / 重建」。", { multiline: true });
+        "就绪 · v" + VER + " — 先在时间轴里点选一个合成, 再点「生成 / 重建」。", { multiline: true });
     pal.status.alignment = ["fill", "center"];
     pinW(pal.status, 320);
 
@@ -2563,9 +2671,9 @@
     //   放在绑定之后建, bindLiveParam 的 onChange 出错也能落进来(flushDiag 判空不炸)
     var dbgPanel = pal.add("panel", undefined, "调试输出(反馈用)");
     dbgPanel.alignChildren = "fill";
-    pal.debugBox = dbgPanel.add("edittext", undefined, "", { multiline: true, readonly: true });
-    pal.debugBox.preferredSize = [320, 110];
-    pinW(pal.debugBox, 320);
+    // v1.5.5: 改走 fixedBox(固定 8 行 + 右侧滚动条) —— 原写法的高度被 pinW 覆盖成自适应,
+    //   调试内容一多就把面板撑高。
+    pal.debugBox = fixedBox(dbgPanel, 320, 8, "", true);
     var dbgRow = dbgPanel.add("group");
     dbgRow.alignment = "fill";
     var btnCopyDbg = dbgRow.add("button", undefined, "复制");
