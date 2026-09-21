@@ -1,5 +1,5 @@
 ﻿/* ============================================================
-   星空粒子生成器  v3.2
+   星空粒子生成器  v3.4
    Starry Sky Particle Generator for Adobe After Effects 2026
 
    基于 v3.2 Mask Feather + ScriptUI 优化
@@ -865,12 +865,12 @@
     function buildUI(thisObj) {
         debugLog("buildUI() starting...");
 
-        // 版本号单一真相(v3.3): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+        // 版本号单一真相(v3.4): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
         //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
-        var VER = "3.3";
+        var VER = "3.4";
 
         var panel = (thisObj instanceof Panel) ? thisObj :
-            new Window("palette", "星空粒子生成器 v3.2", undefined, {resizeable: true});
+            new Window("palette", "星空粒子生成器 v" + VER, undefined, {resizeable: true});
 
         panel.orientation = "column";
         panel.alignChildren = ["fill", "top"];
@@ -2109,7 +2109,9 @@
 
     // ==================== 启动 ====================
 
-    debugLog("=== 星空粒子生成器 v3.2 启动 ===");
+    // ⚠️ 这里访问不到 buildUI 内的 VER(本行在裸块之外) —— 只能硬编码。
+    //   漏改的风险由 test_starry_sky.js 的"启动日志版本号 == VER"断言兜住。
+    debugLog("=== 星空粒子生成器 v3.4 启动 ===");
     debugLog("AE version: " + app.version);
 
     try {

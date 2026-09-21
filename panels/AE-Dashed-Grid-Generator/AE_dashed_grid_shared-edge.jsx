@@ -185,9 +185,9 @@
     }
 
     // ---- 标准面板模式: 停靠为面板时不新建窗口 ----
-    // 版本号单一真相(v1.0.1): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+    // 版本号单一真相(v1.0.2): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
     //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
-    var VER = "1.0.1";
+    var VER = "1.0.2";
 
     var pal = (thisObj instanceof Panel) ? thisObj
         : new Window("palette", "虚线网格生成器", undefined, { resizeable: false });

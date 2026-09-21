@@ -8,12 +8,14 @@
     var MODE_SMOOTH = "平滑+阈值";
     var MODE_BAND   = "频段分离";
 
+    // 版本号单一真相(v1.0.1): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+    //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
+    //   ⚠️ 放在 IIFE 顶层而不是 buildUI 内部: 这样"测试导出闸门"(见下)也能引用它,
+    //      且与仓库其他面板的 VER 位置一致(单一真相不该藏在某个函数里)。
+    var VER = "1.0.1";
+
     // ============ 主 UI ============
     function buildUI(thisObj){
-        // 版本号单一真相(v1.0.0): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
-        //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
-        var VER = "1.0.0";
-
         var win = (thisObj instanceof Panel)
             ? thisObj
             : new Window("palette", "Audio Scale", undefined, {resizeable:true});
@@ -21,9 +23,9 @@
         win.alignChildren = ["fill","top"];
         win.margins = 12; win.spacing = 8;
 
-    // 面板顶部常驻版本号 —— 为什么不是装饰: ScriptUI Panel 由 AE【启动时】载入,
-    //   改完脚本不重启 AE, 面板里跑的还是旧版(AE 报的错也可能是旧文件的行号)。
-    //   没有版本号就无法判断"AE 里跑的是不是最新的"。
+        // 面板顶部常驻版本号 —— 为什么不是装饰: ScriptUI Panel 由 AE【启动时】载入,
+        //   改完脚本不重启 AE, 面板里跑的还是旧版(AE 报的错也可能是旧文件的行号)。
+        //   没有版本号就无法判断"AE 里跑的是不是最新的"。
         var verLbl = win.add("statictext", undefined, "AudioScale  v" + VER);
         try { verLbl.alignment = ["fill", "center"]; } catch (eV1) {}
         try { verLbl.graphics.font = ScriptUI.newFont("dialog", "BOLD", 12); } catch (eVer) {}
@@ -282,6 +284,28 @@
             var bothIdx = findBothChannelsEffectIndex(ampLayers[idx]);
             applyScaleExpression(targets[t], buildBandExpr(ampLayers[idx].name, bothIdx, opts));
         }
+    }
+
+    // ============================================================
+    // node 测试导出闸门(2026-09-21 加, 照 MountainSpectrum 先例)
+    //   为什么需要: 三个表达式生成器(buildBasicExpr / buildSmoothExpr / buildBandExpr)
+    //     与"取 Both Channels 效果索引"的探测函数是纯逻辑, 可在 node 里跑断言 ——
+    //     它们产出的表达式文本一旦写错, 报错只会出现在 AE 的表达式错误里, 很难回溯。
+    //   位置: 必须在【第一行 UI 代码之前】—— 紧邻的 buildUI() 调用会 new Window,
+    //     在 node 里直接抛 ReferenceError。函数声明有提升, 故此处可引用它们。
+    //   AE 里 app 存在 ⇒ 整个 if 被跳过, 运行行为零变化。
+    // ============================================================
+    if (typeof app === "undefined") {
+        if (typeof module !== "undefined" && module.exports) {
+            module.exports = {
+                VER: VER,
+                MODE_BASIC: MODE_BASIC, MODE_SMOOTH: MODE_SMOOTH, MODE_BAND: MODE_BAND,
+                buildBasicExpr: buildBasicExpr, buildSmoothExpr: buildSmoothExpr,
+                buildBandExpr: buildBandExpr,
+                findBothChannelsEffectIndex: findBothChannelsEffectIndex
+            };
+        }
+        return;
     }
 
     // ============ 启动 ============

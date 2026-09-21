@@ -27,9 +27,30 @@
 // ============================================================
 
 (function (thisObj) {
-    // 版本号单一真相(v1.1.1): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+    // 版本号单一真相(v1.1.2): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
     //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
-    var VER = "1.1.1";
+    var VER = "1.1.2";
+
+    // ============================================================
+    // node 测试导出闸门(2026-09-21 加, 照 MountainSpectrum / NumCounter 先例)
+    //   为什么需要: 下面这几个是【纯逻辑函数】(颜色换算 / JSON 序列化),
+    //     不碰任何 AE API, 可以在 node 里跑断言 —— 这是"改完立即验"的唯一抓手。
+    //   位置有硬约束: 必须在【第一行 UI 代码之前】。紧邻的 `new Window` 与
+    //     `instanceof Panel` 在 node 里会直接抛 ReferenceError(Window/Panel 未定义)。
+    //   函数声明有提升, 所以这里能引用文件后部(L302 起)的纯函数, 不必移动它们。
+    //   AE 里 app 存在 ⇒ 整个 if 被跳过, 运行行为零变化。
+    // ============================================================
+    if (typeof app === "undefined") {
+        if (typeof module !== "undefined" && module.exports) {
+            module.exports = {
+                VER: VER,
+                hslToRgb01: hslToRgb01, rgb01ToHsl: rgb01ToHsl,
+                hexToRgb01: hexToRgb01, rgb01ToHex: rgb01ToHex,
+                quote: quote, jsonStringify: jsonStringify, jsonParse: jsonParse
+            };
+        }
+        return;
+    }
 
     var pal = (thisObj instanceof Panel) ? thisObj
         : new Window("palette", "水面波动生成器", undefined, { resizeable: false });

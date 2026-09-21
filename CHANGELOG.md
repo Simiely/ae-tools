@@ -1,5 +1,34 @@
 # 更新日志（CHANGELOG）
 
+## v1.3.26
+
+- **给 5 个零测试面板补断言测试 —— 全仓技术债清零**（此前 **4,656 行代码零回归保护**）：
+
+  | 面板 | 新版本 | 断言数 | 取函数方式 | 本轮顺带修/记 |
+  |---|---|---|---|---|
+  | AE-Water-Rise-Generator | **1.1.2** | 75 | 导出闸门 | 断言按实测真值重写（1/255 → 实测 1.53/255） |
+  | AE-Lyrics-Animator | **3.7** | 38 | 导出闸门 | 记录债务：全文件无 Undo 组 |
+  | AudioScale | **1.0.1** | 53 | 导出闸门 | `VER` 从 buildUI 内提到 IIFE 顶层；修注释缩进 |
+  | starry-sky-generator | **3.4** | 43 | **文本提取** | 修两处硬编码版本号（窗口标题/启动日志还写着 v3.2） |
+  | AE-Dashed-Grid-Generator | **1.0.2** | 29 | —（无纯函数） | 记录债务：`layout.resize()` 撑宽 + 无 Undo 组 |
+
+- **两个可复用的取函数方式**（都进了 `_template/README.md` 的同类讨论）：
+  ① **导出闸门**（首选）—— `if (typeof app === "undefined") { module.exports = …; return; }`，
+     **位置有硬约束**：所有纯函数之后、任何 AE API 之前；AE 里 `app` 存在即整块跳过，运行行为零变化；
+  ② **文本提取**（无闸门可用时）—— 按花括号配对从源码切出函数体再 `eval`。
+     starry-sky 用它是因为外壳是**裸块 `{ … }`**（而非 IIFE），块内 `return` 不合法，闸门写不进去。
+- **本轮发现并修复的缺陷**（都不是用户报的，是"补测试的路上撞见"）：
+  starry-sky 窗口标题与启动日志硬编码 `v3.2` 而 `VER` 已是 3.3（版本号并非单一真相）；
+  AudioScale 的 `VER` 藏在 `buildUI` 函数内部（闸门引用不到，且单一真相不该藏在函数里）。
+- **记录 4 项已知债务**（本次**不改行为**，只在测试里写成条件式断言"钉住不恶化"）：
+  Lyrics-Animator 无 Undo 组 / Dashed-Grid 无 Undo 组 / Dashed-Grid 的 `setStatus` 调 `layout.resize()`
+  （会在状态栏文本变长时撑宽面板，MountainSpectrum v1.1.1 踩过）/ 两处"契约边界"（图层名不转义、
+  `findBothChannelsEffectIndex` 不做空值兜底）。
+- **反向对照全部通过**（每个面板都做了）：合计注入 16 处回归 → 25 条断言精确变红，还原即恢复。
+  过程中抓到一条**弱断言**：把 `Math.round` 改成 `Math.floor` 时 starry-sky 所有颜色断言照样通过
+  —— 已补"半通道值四舍五入"用例专门抓它。
+- 验收：`python verify.py` → **11/11 面板 + 骨架 45/45 全通过，技术债 6 项全清零**
+
 ## v1.3.25
 
 - **新增面板骨架模板 `_template/`**（PanelTemplate.jsx / test / 四件套）：从 MountainSpectrum

@@ -72,9 +72,30 @@ function addEnableCheckbox(parent, label, defaultVal) {
 }
 
 // ---- 构建面板 ----
-// 版本号单一真相(v3.6): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+// 版本号单一真相(v3.7): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
 //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
-var VER = "3.6";
+var VER = "3.7";
+
+// ============================================================
+// node 测试导出闸门(2026-09-21 加, 照 MountainSpectrum 先例)
+//   为什么需要: getDirectionPos / buildScatterFadeExpr 是【纯逻辑】——
+//     一个是"方向 → 偏移向量"的映射, 一个是生成逐字散落的淡入表达式文本,
+//     都不碰 AE API, 可以在 node 里跑断言。
+//   位置有硬约束: 必须在【第一行 UI 代码之前】—— 紧邻的 `new Window` 与
+//     `instanceof Panel` 在 node 里会抛 ReferenceError(Window / Panel 未定义)。
+//   函数声明有提升, 所以这里能引用文件后部(L679 / L775)的这两个函数。
+//   AE 里 app 存在 ⇒ 整个 if 被跳过, 运行行为零变化。
+// ============================================================
+if (typeof app === "undefined") {
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = {
+            VER: VER,
+            getDirectionPos: getDirectionPos,
+            buildScatterFadeExpr: buildScatterFadeExpr
+        };
+    }
+    return;
+}
 
 var pal = (thisObj instanceof Panel) ? thisObj : new Window("palette", "歌词逐字散落动画工具 v" + VER, undefined, {resizeable: true});
 pal.orientation = "column";

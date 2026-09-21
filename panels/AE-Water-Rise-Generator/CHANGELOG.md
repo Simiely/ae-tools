@@ -2,6 +2,19 @@
 
 所有版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [1.1.2] - 2026-09-21 —— 补断言测试(75 条) + 加测试导出闸门
+
+- 此前【零测试】(1044 行)。新增 `test_WaterRisePanel.js`, **75 条断言**:
+  - 纯逻辑(靠新增的「测试导出闸门」导出): `hslToRgb01` / `rgb01ToHsl` / `hexToRgb01` /
+    `rgb01ToHex` / `quote` / `jsonStringify` / `jsonParse`
+  - 源码级体检: 版本号三处一致 / 闸门位置 / IIFE 外壳 / Undo 组配对
+- **测试导出闸门**插在 `var VER` 之后、`var pal = (thisObj instanceof Panel)` 之前 ——
+  位置有硬约束: 紧邻的 `new Window` / `instanceof Panel` 在 node 里会抛 ReferenceError。
+  AE 里 `app` 存在 ⇒ 整个 `if` 被跳过, **运行行为零变化**。
+- 断言按【实测真值】写: 初版"往返误差 <= 1/255"被实测打红 ——
+  实测纯色误差 0、一般颜色最大 **1.53/255**(`rgb01ToHsl` 输出取整所致), 已按真值重写。
+- 反向对照: 注入 3 处回归 → **4 条断言变红**, 还原即恢复。
+
 ## [1.1.1] - 2026-09-21 —— 面板顶部显示版本号
 
 - 新增 `VER` 常量（版本号单一真相）与**面板顶部常驻版本号显示**
