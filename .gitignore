@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .DS_Store
 Thumbs.db
+
+# 开发期临时文件
+panels/MountainSpectrum/_c.js
