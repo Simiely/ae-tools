@@ -10,12 +10,23 @@
 
     // ============ 主 UI ============
     function buildUI(thisObj){
+        // 版本号单一真相(v1.0.0): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+        //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
+        var VER = "1.0.0";
+
         var win = (thisObj instanceof Panel)
             ? thisObj
             : new Window("palette", "Audio Scale", undefined, {resizeable:true});
         win.orientation = "column";
         win.alignChildren = ["fill","top"];
         win.margins = 12; win.spacing = 8;
+
+    // 面板顶部常驻版本号 —— 为什么不是装饰: ScriptUI Panel 由 AE【启动时】载入,
+    //   改完脚本不重启 AE, 面板里跑的还是旧版(AE 报的错也可能是旧文件的行号)。
+    //   没有版本号就无法判断"AE 里跑的是不是最新的"。
+        var verLbl = win.add("statictext", undefined, "AudioScale  v" + VER);
+        try { verLbl.alignment = ["fill", "center"]; } catch (eV1) {}
+        try { verLbl.graphics.font = ScriptUI.newFont("dialog", "BOLD", 12); } catch (eVer) {}
 
         win.add("statictext", undefined, "模式：");
         var modeList = win.add("dropdownlist", undefined, [MODE_BASIC, MODE_SMOOTH, MODE_BAND]);

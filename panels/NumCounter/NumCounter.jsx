@@ -873,12 +873,21 @@
 
     // ---- 标准面板模式: 停靠为面板时不新建窗口 ----
     collectFonts(); // 填充字体下拉(必须在建 UI 前)
+    // 版本号单一真相(v0.2.10): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+    //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
+    var VER = "0.2.10";
+
     var pal = (thisObj instanceof Panel) ? thisObj
         : new Window("palette", "NumCounter · 数字计数器", undefined, { resizeable: false });
     pal.orientation = "column";
     pal.alignChildren = "fill";
     pal.spacing = 8;
     pal.margins = 12;
+
+    // 面板顶部常驻版本号 —— ScriptUI Panel 由 AE【启动时】载入, 改完不重启 AE 跑的还是旧版
+    var verLbl = pal.add("statictext", undefined, "NumCounter 数字计数器  v" + VER);
+    try { verLbl.alignment = ["fill", "center"]; } catch (eV1) {}
+    try { verLbl.graphics.font = ScriptUI.newFont("dialog", "BOLD", 12); } catch (eVer) {}
 
     // 参数区
     var pParam = pal.add("panel", undefined, "参数");

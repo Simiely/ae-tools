@@ -914,12 +914,20 @@
 
     var inExtendScript = (typeof app !== "undefined");
     if (inExtendScript) {
+        // 版本号单一真相(v3.8): 与 CHANGELOG 顶部标题保持一致; 面板顶部会显示它。
+        var VER = "3.8";
+
         var pal = PANEL_MODE ? thisObj
             : new Window("palette", "滚动歌词生成器", undefined, { resizeable: false });
         pal.orientation = "column";
         pal.alignChildren = "fill";
         pal.spacing = 5;
         pal.margins = 12;
+
+        // 面板顶部常驻版本号 —— AE 只在启动时载入脚本, 没版本号就无法判断跑的是哪版
+        var verLbl = pal.add("statictext", undefined, "滚动歌词生成器（v1 冻结线）  v" + VER);
+        try { verLbl.alignment = ["fill", "center"]; } catch (eV1) {}
+        try { verLbl.graphics.font = ScriptUI.newFont("dialog", "BOLD", 12); } catch (eVer) {}
 
         SCRIPTS.ui.buildUI(pal);
 

@@ -169,6 +169,8 @@ def main():
     no_test = []
     no_ver = []
     no_exit = []
+    placeholder_hits = []
+    ver_mismatch = []
     deploy_mismatch = []
     bad_jsx = []
 
@@ -224,11 +226,33 @@ def main():
         raw = open(jsx, "rb").read().decode("utf-8-sig", "replace")
         if "var VER = " not in raw:
             no_ver.append(name)
-        # ⑤ 欠债: 测试是否具备【失败退出码】(没有它, 验收只能靠猜输出格式)
+        # ⑤ 欠债: 测试是否具备【失败退出码】
+        #   ⚠️ 判据不能只认 `process.exit` —— 2026-09-21 实测证明那是【误报】:
+        #      AE-Rolling-Lyrics 用 node 内置 assert, assert 失败会抛未捕获异常,
+        #      node 自己就返回 1(往它末尾注入 assert.ok(false) 实测退出码 = 1)。
+        #      正确判据: ① 显式 process.exit, 或 ② 用了会抛异常的断言(require("assert"))。
+        #   教训: 静态检查的判据写窄了会产出"看起来很专业"的假债, 必须用实测校正。
         if test:
             tb = open(test, "rb").read().decode("utf-8-sig", "replace")
-            if "process.exit" not in tb:
+            has_exit = "process.exit" in tb
+            has_assert = ("require(\"assert\")" in tb or "require('assert')" in tb
+                          or "require(\"node:assert\")" in tb or "require('node:assert')" in tb)
+            if not (has_exit or has_assert):
                 no_exit.append(name)
+        # ⑥ 占位符残留 —— 改代码中间态漏网(教训: 2026-09-21 批量加版本号时残留了 `HOST.add`,
+        #    而 `node --check` 只查语法、**抓不到未定义变量**, 四个面板全"通过"却是坏的)
+        for mk in ("HOST.add", "PLACEHOLDER", "TODO:", "FIXME:"):
+            if mk in raw:
+                placeholder_hits.append("%s(%s)" % (name, mk))
+        # ⑦ VER 与 CHANGELOG 顶部版本是否一致(把"三处一致"从靠人记变成自动查)
+        mver = re.search(r'var VER = "([0-9][0-9.]*)"', raw)
+        if mver:
+            cl_path = os.path.join(os.path.dirname(jsx), "CHANGELOG.md")
+            if os.path.exists(cl_path):
+                cl = open(cl_path, "rb").read().decode("utf-8-sig", "replace")
+                mcl = re.search(r"^##\s*\[?v?([0-9]+\.[0-9]+(?:\.[0-9]+)?)", cl, re.M)
+                if mcl and mcl.group(1) != mver.group(1):
+                    ver_mismatch.append("%s(VER=%s / CHANGELOG=%s)" % (name, mver.group(1), mcl.group(1)))
 
         if ok_syn and ok_t:
             n_ok += 1
@@ -257,13 +281,25 @@ def main():
         print("② 无 VER 版本常量: 无 ✓")
     if no_exit:
         print("③ 测试缺【失败退出码】(失败也返回 0, 验收只能靠猜文本): %d 个" % len(no_exit))
-        print("     " + ", ".join(no_exit) + "   -> 在该测试末尾补 process.exit(failed ? 1 : 0)")
+        print("     " + ", ".join(no_exit) + "   -> 末尾补 process.exit(failed ? 1 : 0), 或改用 node assert")
     else:
-        print("③ 测试缺失败退出码: 无 ✓")
+        print("③ 测试失败退出码: 全部具备 ✓ (process.exit 或 node assert)")
+    if placeholder_hits:
+        print("④ 占位符/未定义变量残留(语法检查抓不到!): %d 处" % len(placeholder_hits))
+        print("     " + ", ".join(placeholder_hits))
+    else:
+        print("④ 占位符残留: 无 ✓")
+    if ver_mismatch:
+        print("⑤ VER 与 CHANGELOG 顶部版本不一致: %d 个" % len(ver_mismatch))
+        print("     " + ", ".join(ver_mismatch))
+    else:
+        print("⑤ VER 与 CHANGELOG 一致: ✓ (仅对声明了 VER 的面板)")
     if deploy_mismatch:
-        print("④ 部署副本与源码不一致: %d 个 -> 跑 python install.py" % len(deploy_mismatch))
+        print("⑥ 部署副本与源码不一致: %d 个 -> 跑 python install.py" % len(deploy_mismatch))
         print("     " + ", ".join(deploy_mismatch))
 
+    if placeholder_hits:
+        n_fail += len(placeholder_hits)      # 占位符残留是真缺陷, 计入失败
     ok_all = (n_fail == 0)
     print()
     print("=" * 72)

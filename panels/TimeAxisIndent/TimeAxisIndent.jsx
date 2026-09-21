@@ -1,6 +1,6 @@
 ﻿// ============================================================
 // 时间轴错位显示工具  TimeAxisIndent.jsx
-// 版本: 1.7.1  (2026-08-11)
+// 版本: 1.7.2  (2026-08-11)
 // 适用: After Effects CC 全版本 至 2026 (ExtendScript / ScriptUI)
 //
 // v1.7.1 变更:自定义文字默认值调整——默认填入竖线 "|",
@@ -269,6 +269,10 @@
     //   - 作为普通脚本运行(双击 / 文件 > 脚本 > 运行脚本文件):
     //       `this` 是 global object,需要自己 new 一个浮动 Window。
     // (Adobe 官方 Scripting Guide + Paul Tuersley / Aaron Cobb 标准模式)
+    // 版本号单一真相(v1.7.2): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+    //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
+    var VER = "1.7.2";
+
     var pal = (thisObj instanceof Panel)
         ? thisObj
         : new Window("palette", "时间轴错位显示", undefined, { resizeable: false });
@@ -279,6 +283,13 @@
     pal.margins = 12;
 
     // 作用范围
+    // 面板顶部常驻版本号 —— 为什么不是装饰: ScriptUI Panel 由 AE【启动时】载入,
+    //   改完脚本不重启 AE, 面板里跑的还是旧版(AE 报的错也可能是旧文件的行号)。
+    //   没有版本号就无法判断"AE 里跑的是不是最新的"。
+    var verLbl = pal.add("statictext", undefined, "时间轴错位显示  v" + VER);
+    try { verLbl.alignment = ["fill", "center"]; } catch (eV1) {}
+    try { verLbl.graphics.font = ScriptUI.newFont("dialog", "BOLD", 12); } catch (eVer) {}
+
     var g1 = pal.add("group");
     g1.add("statictext", undefined, "作用范围:");
     var ddlScope = g1.add("dropdownlist", undefined, ["选中图层", "全部图层"]);

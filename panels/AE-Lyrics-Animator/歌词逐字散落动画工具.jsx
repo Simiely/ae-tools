@@ -72,11 +72,20 @@ function addEnableCheckbox(parent, label, defaultVal) {
 }
 
 // ---- 构建面板 ----
-var pal = (thisObj instanceof Panel) ? thisObj : new Window("palette", "歌词逐字散落动画工具 v3.5", undefined, {resizeable: true});
+// 版本号单一真相(v3.6): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+//   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
+var VER = "3.6";
+
+var pal = (thisObj instanceof Panel) ? thisObj : new Window("palette", "歌词逐字散落动画工具 v" + VER, undefined, {resizeable: true});
 pal.orientation = "column";
 pal.alignChildren = ["fill", "top"];
 pal.spacing = 4;
 pal.margins = [8, 8, 8, 8];
+
+// 面板顶部常驻版本号 —— ScriptUI Panel 由 AE【启动时】载入, 改完不重启 AE 跑的还是旧版
+var verLbl = pal.add("statictext", undefined, "歌词逐字散落动画工具  v" + VER);
+try { verLbl.alignment = ["fill", "center"]; } catch (eV1) {}
+try { verLbl.graphics.font = ScriptUI.newFont("dialog", "BOLD", 12); } catch (eVer) {}
 
 // 标题
 var titleGrp = pal.add("group");

@@ -7,6 +7,13 @@
 - **架构描述对齐**: 面板 README / AGENTS / DEVELOPMENT 此前停留在 v0.1.x 单文本图层 + `buildExpr` 描述; 已校正为 v0.2.0 起的「独立数位 / odometer」架构(`buildSlotExpr` + `数位 N` 独立层 + 控制空对象 `NumCounter 控制`); 测试断言数 19→60(以 `node test_NumCounter.js` 实测 60 通过为准)。
 - **新增文档**: 4 槽位预设(`presetsCache` + 工程目录 `NumCounter.presets.json`, 避开 app.settings)写入 README 特性与 AGENTS 关键坑。
 
+## v0.2.10（2026-09-21）—— 面板顶部显示版本号
+
+- 新增 `VER` 常量（版本号单一真相：文件头注释 / 常量 / CHANGELOG 顶部三处一致）
+- 面板顶部常驻显示 `NumCounter 数字计数器  v0.2.10`
+- 为什么必须：ScriptUI Panel 由 **AE 启动时**载入 —— 改完脚本不重启 AE，面板里跑的还是旧版，
+  AE 报的错也可能是旧文件的行号。没有版本号就无法判断 AE 里跑的是不是最新的。
+
 ## v0.2.9（2026-09-01 修复「存储后使用按钮不变可用」真正根因: 槽位索引错位）
 
 - **现象**: 点「存储预设 N」成功后, 对应的「使用预设 N」按钮仍是灰的(不可用)

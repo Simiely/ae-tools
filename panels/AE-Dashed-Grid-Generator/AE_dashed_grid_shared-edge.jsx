@@ -185,12 +185,23 @@
     }
 
     // ---- 标准面板模式: 停靠为面板时不新建窗口 ----
+    // 版本号单一真相(v1.0.1): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+    //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
+    var VER = "1.0.1";
+
     var pal = (thisObj instanceof Panel) ? thisObj
         : new Window("palette", "虚线网格生成器", undefined, { resizeable: false });
     pal.orientation = "column";
     pal.alignChildren = "fill";
     pal.spacing = 8;
     pal.margins = 12;
+
+    // 面板顶部常驻版本号 —— 为什么不是装饰: ScriptUI Panel 由 AE【启动时】载入,
+    //   改完脚本不重启 AE, 面板里跑的还是旧版(AE 报的错也可能是旧文件的行号)。
+    //   没有版本号就无法判断"AE 里跑的是不是最新的"。
+    var verLbl = pal.add("statictext", undefined, "虚线网格生成器  v" + VER);
+    try { verLbl.alignment = ["fill", "center"]; } catch (eV1) {}
+    try { verLbl.graphics.font = ScriptUI.newFont("dialog", "BOLD", 12); } catch (eVer) {}
 
     var p1 = pal.add("panel", undefined, "行列");
     p1.orientation = "row";

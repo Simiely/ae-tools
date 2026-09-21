@@ -1,5 +1,21 @@
 # 更新日志（CHANGELOG）
 
+## v1.3.24
+
+- **横向统一：11 个面板全部具备「版本号单一真相 + 面板顶部常驻显示」**
+  背景：AE 只在**启动时**载入 ScriptUI Panel 脚本 —— 改完不重启 AE，面板里跑的还是旧版，
+  而 AE 报的错也可能是**旧文件**的行号（2026-09-21 MountainSpectrum 实测：AE 比脚本早启动 33 分钟，
+  报的「行 2069」属于旧文件）。没有版本号就无从判断 AE 里跑的是不是最新的。
+  - 为其余 10 个面板补齐 `var VER` 常量 + 面板顶部加粗版本号：
+    AudioScale **v1.0.0**（首次编号，此前 CHANGELOG 只写「当前版本」）、TimeAxisIndent **v1.7.2**、
+    AE-Dashed-Grid **v1.0.1**、AE-Water-Rise **v1.1.1**、AE-Lyrics-Animator **v3.6**、
+    AE-Rolling-Lyrics **v3.8**、AE-Rolling-Lyrics-V2 **v2.0.14**、NumCounter **v0.2.10**、
+    QuickKey **v0.3.12**、starry-sky-generator **v3.3**
+  - 顺带修两处版本号不一致：QuickKey 文件头停在 `0.3.6` 而 CHANGELOG 已到 `0.3.11`；
+    TimeAxisIndent 文件头 `1.7.1` 与新增的 `VER` 不同步
+  - `verify.py` 新增两项检查：**占位符残留**（教训：批量改时残留 `HOST.add`，而 `node --check`
+    只查语法、**抓不到未定义变量**，四个面板全"通过"却是坏的）、**VER 与 CHANGELOG 顶部一致性**
+  - 验收：`python verify.py` → **11/11 通过**；「无 VER 常量」欠债 **10 → 0**
 ## v1.3.23
 
 - **MountainSpectrum v1.5.5 → v1.5.6**：修「起伏曲线」枚举越界分叉 —— 架构审计用**边界分叉探测**

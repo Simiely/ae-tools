@@ -1,6 +1,6 @@
 ﻿// ============================================================
 // QuickKey · 节点式 K 帧排程面板  QuickKey.jsx
-// 版本: 0.3.6  (2026-08-19)
+// 版本: 0.3.12  (2026-09-21)
 // 适用: After Effects CC 2015.3+ (依赖 selectedProperties API)
 //
 // 以当前时间指示器为锚点,按节点排程给选中属性批量打关键帧;
@@ -1442,12 +1442,21 @@
     var isAe = (typeof app !== "undefined");
 
     if (isAe) {
+        // 版本号单一真相(v0.3.12): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+        //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
+        var VER = "0.3.12";
+
         var pal = (thisObj instanceof Panel) ? thisObj
             : new Window("palette", "QuickKey · 快速K帧", undefined, {resizeable: false});
         pal.orientation = "column";
         pal.alignChildren = ["fill", "top"];
         pal.spacing = 6;
         pal.margins = 8;
+
+        // 面板顶部常驻版本号 —— ScriptUI Panel 由 AE【启动时】载入, 改完不重启 AE 跑的还是旧版
+        var verLbl = pal.add("statictext", undefined, "QuickKey 快速K帧  v" + VER);
+        try { verLbl.alignment = ["fill", "center"]; } catch (eV1) {}
+        try { verLbl.graphics.font = ScriptUI.newFont("dialog", "BOLD", 12); } catch (eVer) {}
 
         // ---- Tab 键只在数字输入框之间循环(v0.2.7)----
         // 方案(搜索确认):ScriptUI edittext 支持 onKeyDown 处理器,event.keyName

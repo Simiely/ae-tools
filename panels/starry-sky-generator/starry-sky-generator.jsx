@@ -865,6 +865,10 @@
     function buildUI(thisObj) {
         debugLog("buildUI() starting...");
 
+        // 版本号单一真相(v3.3): 文件头注释 / 本常量 / CHANGELOG 顶部标题三处保持一致;
+        //   面板顶部会显示它 —— 用来判断 AE 里跑的是不是最新版。
+        var VER = "3.3";
+
         var panel = (thisObj instanceof Panel) ? thisObj :
             new Window("palette", "星空粒子生成器 v3.2", undefined, {resizeable: true});
 
@@ -877,7 +881,7 @@
         // ===== 标题 =====
         var titleRow = panel.add("group");
         titleRow.orientation = "row";
-        titleRow.add("statictext", undefined, "★  星空粒子生成器  v3.2  |  AE " + app.version);
+        titleRow.add("statictext", undefined, "★  星空粒子生成器  v" + VER + "  |  AE " + app.version);
 
         var line1 = panel.add("panel");
         line1.preferredSize = [-1, 2];
