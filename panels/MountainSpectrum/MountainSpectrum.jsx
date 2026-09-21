@@ -1,6 +1,6 @@
 ﻿// ============================================================
 // 山峰频谱  MountainSpectrum.jsx
-// 版本: 1.5.2  (2026-09-20)
+// 版本: 1.5.3  (2026-09-20)
 // 适用: After Effects 2015.3+ 至 2026 (ExtendScript / ScriptUI)
 //
 // 功能:
@@ -458,6 +458,8 @@
     var SL_COLOR = "矩形颜色";   // 图层上的 Color Control, 统一驱动所有组内填充
 
     var FILL_COLOR = [1, 1, 1, 1];           // v1.5.1 默认白色 (4D RGBA, 必须 4 个分量); 可在面板取色器里改
+    // 版本号单一真相: 文件头注释 + 两处诊断输出都以此为准(测试断言三者一致, 防止再漏改)
+    var VER = "1.5.3";
     var MAX_BARS   = 400;
     var MAX_POINTS = 60;
 
@@ -2601,7 +2603,7 @@
     function dumpDiagnostics() {
         gDiag.length = 0;
         diag("---- 山峰频谱诊断 ----");
-        diag("脚本版本: 1.5.2");
+        diag("脚本版本: " + VER);
         diag("AE 版本: " + app.version);
         diag("工程: " + ((app.project && app.project.file) ? app.project.file.fsName : "(未保存)"));
         var comp = getComp();
@@ -2658,7 +2660,7 @@
     // 启动: 读一次工程目录里的预设槽 + 起常驻轮询(之后打开/切换工程会自动重读)
     //   整段兜底 —— 启动期抛错同样会让面板"看起来正常但什么都不响应"
     try {
-        diag("面板已加载 v1.5.3");
+        diag("面板已加载 v" + VER);
         flushDiag(pal);
         watchProject(pal);
         startProjectWatch(pal);

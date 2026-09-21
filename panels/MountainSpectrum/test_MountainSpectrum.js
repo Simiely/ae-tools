@@ -934,6 +934,22 @@ eq("柱色按钮初始文字显示默认色 #FFFFFF(不是「选色…」)", src
     srcR.indexOf('"button", undefined, "选色…")') < 0, true);
 eq("填充颜色由图层颜色控件统一驱动(effect 表达式引用)", srcR.indexOf('fc.expression = "effect(\\"" + SL_COLOR + "\\")(1)";') >= 0, true);
 
+// 版本号单一真相(⭐ v1.5.3 实测漏改: 只改了带 v 前缀的 diag, 文件头裸号与「脚本版本」两处漏掉)
+eq("版本号三处一致(文件头 / VER 常量 / CHANGELOG 顶部标题)", (function () {
+    var mHead = raw.match(/^\/\/ 版本:\s*([0-9]+\.[0-9]+\.[0-9]+)/m);
+    var mVer = raw.match(/var VER = "([0-9]+\.[0-9]+\.[0-9]+)";/);
+    if (!mHead || !mVer) { return false; }
+    var chg = "";
+    try {
+        var chgTxt = fs.readFileSync(path.join(__dirname, "CHANGELOG.md"), "utf8");
+        var mC = chgTxt.match(/^## v([0-9]+\.[0-9]+\.[0-9]+)/m);
+        chg = mC ? mC[1] : "";
+    } catch (eChg) { return false; }
+    return mHead[1] === mVer[1] && mVer[1] === chg;
+})(), true);
+eq("版本号无硬编码残留(诊断输出必须走 VER 常量)", raw.indexOf('diag("脚本版本: 1.5.') < 0 &&
+    raw.indexOf('diag("面板已加载 v1.5.') < 0, true);
+
 // ============================================================
 console.log("---------------------------------------------");
 console.log((failed === 0 ? "全部通过" : "存在失败") + ": " + passed + " 通过 / " + failed + " 失败");
