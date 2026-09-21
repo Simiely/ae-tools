@@ -9,6 +9,10 @@
 ae-tools/
 ├─ README.md · AGENTS.md · DEVELOPMENT.md · CHANGELOG.md   四件套文档
 ├─ install.py             一键部署器（检测 AE 版本 + UTF-8 BOM + 字节校验）
+├─ verify.py              仓库级验收（语法 + 断言 + 部署一致性 + 技术债 + 骨架巡检）
+├─ new_panel.py           新面板脚手架（从 _template/ 派生：复制 + 改名 + 替换标识）
+├─ _template/             面板骨架模板 ⚠️ 不能放 panels/ 下（会被误当面板部署）
+│                         → 约定速查见 _template/README.md
 ├─ panels/                自写 · ScriptUI 面板 → Window > Extensions
 ├─ scripts/               自写 · 无 UI 脚本（预留）→ File > Scripts
 ├─ third-party/           收集 · 第三方/外部脚本（README 标注来源）→ 按类型部署
@@ -59,6 +63,7 @@ python install.py --dry-run  # 先看会装什么
 
 1. 改代码：修改 `panels/<Tool>/<Tool>.jsx`（本仓库是唯一源码源）
 2. 部署：`python install.py`
+3. 写新面板：`python new_panel.py MyPanel "我的面板"`（从 `_template/` 派生，自带测试骨架）
 3. 重启 AE 验证
 
 ## 文档

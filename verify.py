@@ -10,6 +10,7 @@ ae-tools 仓库级验收器（verify.py）
   ② 断言测试    跑所有带 test_*.js 的面板（必须在该面板目录内跑，测试按相对路径载入源码）
   ③ 部署一致性  AE 部署副本 vs 源码（去 BOM + 归一化行尾后逐字节比对）
   ④ 欠债清单    列出「无测试」「无 VER 常量」的面板 —— 把技术债摆到台面上
+  ⑤ 骨架巡检    _template/ 的模板本体（语法 + 自带测试 + 版本一致性）
 
 用法:
     python verify.py                 # 全跑
@@ -263,6 +264,48 @@ def main():
     print("-" * 72)
     print("面板 %d 个: 通过 %d / 失败 %d" % (len(panels), n_ok, n_fail)
           + ("  |  无法判定 %d" % n_warn if n_warn else ""))
+
+    # ---- ⑤ _template/ 骨架巡检 ----
+    #   为什么必须单独查: `install.py` 会收集 `panels/` 一级子目录里的 .jsx 并部署
+    #   —— 模板若放 `panels/` 下会被当成真面板装进 AE, 所以它只能放仓库根的 `_template/`。
+    #   代价是 verify.py 的面板扫描(`panels/*`) 覆盖不到它。而模板会被【反复复制】,
+    #   **不查就会腐化**: 一年后复制出来的骨架可能是坏的, 而且要等真机报错才发现。
+    tpl_dir = os.path.join(HERE, "_template")
+    tpl_jsx = os.path.join(tpl_dir, "PanelTemplate.jsx")
+    if not os.path.exists(tpl_jsx):
+        print("%-28s %s未找到模板（若已废弃, 请一并删掉 verify.py 里这段巡检）"
+              % ("_template(骨架)", C_WARN))
+    else:
+        ok_s, err_s = check_syntax(tpl_jsx)
+        s_syn_t = "OK" if ok_s else "FAIL"
+        tpl_ok = ok_s
+        tpl_test = os.path.join(tpl_dir, "test_PanelTemplate.js")
+        if not os.path.exists(tpl_test):
+            # 模板必须自带测试 —— 它的断言有一半是"骨架体检", 守着模板自身不被改腐
+            s_t_t = "FAIL 缺 test_PanelTemplate.js"
+            tpl_ok = False
+        else:
+            ok_t2, tinfo2 = check_tests(tpl_dir, tpl_test)
+            if ok_t2 is None:
+                s_t_t = "WARN " + tinfo2
+            elif ok_t2:
+                s_t_t = tinfo2
+            else:
+                s_t_t = "FAIL " + tinfo2
+                tpl_ok = False
+        # 版本一致性(与面板同一套判据: VER 常量 vs CHANGELOG 顶部)
+        traw = open(tpl_jsx, "rb").read().decode("utf-8-sig", "replace")
+        mt = re.search(r'var VER = "([0-9][0-9.]*)"', traw)
+        tcl = os.path.join(tpl_dir, "CHANGELOG.md")
+        if mt and os.path.exists(tcl):
+            clt = open(tcl, "rb").read().decode("utf-8-sig", "replace")
+            mclt = re.search(r"^##\s*\[?v?([0-9]+\.[0-9]+(?:\.[0-9]+)?)", clt, re.M)
+            if mclt and mclt.group(1) != mt.group(1):
+                s_t_t += " | 版本不一致(VER=%s/CHANGELOG=%s)" % (mt.group(1), mclt.group(1))
+                tpl_ok = False
+        if not tpl_ok:
+            n_fail += 1
+        print("%-28s %-8s %-22s %s" % ("_template(骨架)", s_syn_t, s_t_t, "—(不部署)"))
 
     # ---- 欠债清单 ----
     print()
