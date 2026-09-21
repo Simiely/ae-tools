@@ -106,9 +106,16 @@ function mkThisComp(ctrlPos, ctrlFx, points, hgtY) {
 }
 // AE 取表达式最后一句的值; node 的 new Function 不会自动返回 -> 补一句 return <收尾变量>
 // v1.4.0: 补 time 全局(帧缓冲采样用); mock 的 position/effect 值都带 valueAtTime(见 mkThisComp)
-function evalExpr(code, thisComp, layerPos, outVar) {
-    var f = new Function("thisComp", "transform", "time", code + "\nreturn " + outVar + ";");
-    return f(thisComp, { position: layerPos }, 0);
+// v1.5.8: 多给一个 thisLayer —— 表达式用 thisLayer.toComp(transform.anchorPoint) 取
+//   【本图层在合成空间的真实位置】。layerWorld 就是那个"真实位置"：
+//   · 不传 → 等于 layerPos(模拟"没有父级", 此时 toComp ≡ transform.position)
+//   · 传了且与 layerPos 不同 → 模拟"设了父级: position 被 AE 补偿, 而视觉位置是 layerWorld"
+//   ⚠️ 必须能分离这两个值, 否则"只动 position"与"只动真实位置"在 mock 里表现相同, 测不出差异。
+function evalExpr(code, thisComp, layerPos, outVar, layerWorld) {
+    var f = new Function("thisComp", "transform", "time", "thisLayer",
+        code + "\nreturn " + outVar + ";");
+    return f(thisComp, { position: layerPos, anchorPoint: [0, 0] }, 0,
+        { toComp: function () { return layerWorld || layerPos; } });
 }
 // 给数值/数组挂 valueAtTime(v1.4.0 帧缓冲表达式会调用; 静态 mock 恒返回自身)
 function withVT(v) {
@@ -154,8 +161,11 @@ function exprH(i, points, opts) {
     //   用 ctrlPos/barPos 分别覆盖, 就能模拟"给柱设父级(AE 会补偿其 position)"这一幕。
     var ctrlPos = o.ctrlPos || [ROWX, ROWY];
     var barPos  = o.barPos  || [ROWX, ROWY];
+    // barWorld = 柱图层在【合成空间】的真实位置(v1.5.8 起形状基准取它);
+    //   与 barPos 分离, 才能分辨"AE 补偿了 position"与"图层真的移动了"。
+    var barWorld = o.barWorld || barPos;
     return evalExpr(code, mkThisComp(ctrlPos, mkCtrlFx(o),
-        points, o.hMax != null ? ctrlPos[1] - o.hMax : null), barPos, NM.outSize)[1];
+        points, o.hMax != null ? ROWY - o.hMax : null), barPos, NM.outSize, barWorld)[1];
 }
 function countPx(points, opts) {
     var c = 0, i;
@@ -430,10 +440,12 @@ cur = "七、形状图层可拖动(回归)";
 var posExpr = T.buildPosExpr(0, 2, 1);
 eq("位置表达式不含抵消图层位置的写法", posExpr.indexOf("bx - transform.position[0]") < 0, true);
 eq("位置表达式输出纯偏移", posExpr.indexOf("var outPos = [(i - (N - 1) / 2) * (W + G), -h / 2];") >= 0, true);
-// ⚠️ 原断言写的是 indexOf("transform.position[0] + ...") —— v1.5.7 把基准改成
-//   "c.transform.position[0] + ..." 之后【它照样通过】(子串仍匹配), 属漏网的弱断言。
-//   改成带 c. 前缀的完整串, 才能真正钉住"基准取自控制器"。
-eq("核心用【控制器】X 作为整行基准(v1.5.7)", T.buildExprCore(0, 2, 1).indexOf("var bx = c.transform.position[0] + (i - (N - 1) / 2) * pitch") >= 0, true);
+// ⚠️ 断言演进史(同一个坑踩了两次): 最初写 indexOf("transform.position[0] + ..."),
+//   v1.5.7 改成 c.transform.position[0] + ... 后它【照样通过】(c. 后面的子串仍匹配);
+//   v1.5.8 又改成 wp[0](toComp 真实位置)。教训: 基准类断言必须钉【当前实现的完整串】+
+//   同时断言【旧写法不存在】(见第十三节), 否则每次改基准实现它都会静默失效。
+eq("核心用【合成空间真实位置】X 作为整行基准(v1.5.8, toComp)",
+   T.buildExprCore(0, 2, 1).indexOf("var bx = wp[0] + (i - (N - 1) / 2) * pitch") >= 0, true);
 var pv0 = evalExpr(T.buildPosExpr(2, 2, 1), mkThisComp([ROWX, ROWY], mkCtrlFx({}), [pt(PX1, { rl: 170, rr: 170 })]), [ROWX, ROWY], NM.outPos);
 var pv1 = evalExpr(T.buildPosExpr(2, 2, 1), mkThisComp([ROWX, ROWY], mkCtrlFx({}), [pt(PX1, { rl: 170, rr: 170 })]), [ROWX + 200, ROWY], NM.outPos);
 near("图层右移 200 -> 输出偏移不变(X 无关)", pv1[0] - pv0[0], 0, 1e-12);
@@ -1061,63 +1073,71 @@ eq("边界值逐根等价: " + (EDGE_PARAM.length + EDGE_POINT.length) + " 用�
 eq("边界用例数 = 25(防止用例被误删)", EDGE_PARAM.length + EDGE_POINT.length, 25);
 
 // ============================================================
-cur = "十三、柱图层设父级 / 拖动不再影响形状(v1.5.7)";
+cur = "十三、柱图层设父级跟随运动(按【真实位置】采样地形, v1.5.8)";
 // ============================================================
-// 用户需求:「希望控制点的位置不变, 也能有效果」——
-//   给「山峰 柱」设父级让整座山跟随运动, 而峰点(控制点)留在原位不动, 山形要保持。
-//   前提: 山形是由【控制点】决定的, 所以控制点不动 → 形状就该不变。
+// 用户澄清:「山峰柱根据它的位置跟控制点互动, 看是否起伏」——
+//   控制点是【固定在合成里的地形】, 柱是【移动的采样者】: 柱走到哪儿就按哪儿的地形高度长,
+//   被父级带走后离控制点远了, 就【该】不起伏。
 //
-// 根因: 基准 X/Y 原先取自【柱图层自身的 transform.position】。
-//   在 AE 里给图层设父级时, AE 会【补偿】该值(改写它以保持视觉位置) → 基准跟着漂 →
-//   与峰点坐标(未设父级, 仍是合成坐标)差一个父级偏移 → 山形散掉。
-//   实测(40 根取样): 只有柱的坐标系平移 → 33/40 根高度改变。
+// 基准 = 本图层在合成空间的【真实位置】= thisLayer.toComp(transform.anchorPoint):
+//   · 无父级时 ≡ transform.position → 与最初行为完全一致(零变化)
+//   · 设父级瞬间 AE 会补偿 position 但视觉位置不变 → 真实位置不变 → 形状不变
+//   · 父级运动 → 真实位置变化 → 高度按新位置重算(这就是要的"扫过地形"效果)
 //
-// 修法: 基准改用【控制器位置】(c.transform.position) —— 空对象, 不跟随运动,
-//   于是基准与峰点恒在同一坐标系 → 柱图层可自由设父级, 形状由控制点唯一决定。
-//
-// 本节钉三件事: ① 柱位置变化不影响形状 ② 基准确实来自控制器 ③ 控制器变化会改变形状
+// ⚠️ 对照两个错法: ① 用 transform.position 当基准 → 设父级后它是【父级坐标系】的值,
+//   与峰点(合成坐标)差一个父级偏移 → 形散; ② 把基准挂到控制器上(v1.5.7 的做法) →
+//   形状被钉死, 柱子跟着山形整体走, 就【不会】随位置重新采样了。
 {
     var pts13 = [pt(PX1, { rl: 170, rr: 170 }), pt(PX2, { rl: 240, rr: 240 })];
-    function sigAt(ctrlPos, barPos) {
+    function sigAt(barWorld, barPos) {
         var out = [];
         for (var q = 0; q < NN; q++) {
-            out.push(Number(exprH(q, pts13, { ctrlPos: ctrlPos, barPos: barPos })).toFixed(6));
+            out.push(Number(exprH(q, pts13, {
+                barWorld: barWorld,
+                barPos: barPos || barWorld
+            })).toFixed(6));
         }
         return out.join(",");
     }
-    var base13 = sigAt([ROWX, ROWY], [ROWX, ROWY]);
-    eq("基准场景本身有起伏(防止全平导致的假绿)",
-       (function () { var a = base13.split(","); var mx = Math.max.apply(null, a), mn = Math.min.apply(null, a); return Number(mx) - Number(mn) > 1; })(), true);
+    var base13 = sigAt([ROWX, ROWY]);
+    eq("基准场景本身有起伏(防止全平造成的假绿)",
+       (function () {
+           var a = base13.split(","), mx = Math.max.apply(null, a), mn = Math.min.apply(null, a);
+           return Number(mx) - Number(mn) > 1;
+       })(), true);
 
-    // ① 核心: 柱图层位置变了(等价于"设父级后被 AE 补偿"), 形状必须逐位不变
-    eq("柱图层位置平移 (+300,-200) → 40 根高度逐位不变(设父级不再毁掉山形)",
-       sigAt([ROWX, ROWY], [ROWX + 300, ROWY - 200]) === base13, true);
-    eq("柱图层位置反向平移 (-500,+120) → 同样逐位不变",
-       sigAt([ROWX, ROWY], [ROWX - 500, ROWY + 120]) === base13, true);
+    // ① 核心(用户要的行为): 柱的【真实位置】变了 → 形状必须跟着重算
+    eq("柱真实位置右移 +300 → 形状改变(柱扫过固定地形, 到新位置按新地形起伏)",
+       sigAt([ROWX + 300, ROWY]) !== base13, true);
+    eq("柱真实位置上移 -200 → 形状改变(基线 Y 同样按真实位置算)",
+       sigAt([ROWX, ROWY - 200]) !== base13, true);
+    eq("柱真实位置移出控制点影响范围 → 整排回到基础高度(不再起伏)",
+       sigAt([ROWX + 2000, ROWY]).indexOf("0.000000") >= 0, true);
 
-    // ② 基准确实来自控制器: 控制器移动(柱/峰点都不动)必须改变形状
-    eq("控制器位置平移 → 形状随之改变(证明基准取自控制器而非本图层)",
-       sigAt([ROWX + 300, ROWY], [ROWX, ROWY]) !== base13, true);
+    // ② 设父级"瞬间"的行为: AE 补偿 position(值变) 但真实位置不变 → 形状必须逐位不变
+    eq("柱的 position 被 AE 补偿(值变、真实位置不变) → 形状逐位不变",
+       sigAt([ROWX, ROWY], [ROWX - 800, ROWY - 300]) === base13, true);
 
-    // ③ 柱位置与"基线 Y"无关: 只有柱的 Y 变化, 形状不变
-    eq("只有柱的 Y 变化 → 形状不变(基线 Y 也取自控制器)",
-       sigAt([ROWX, ROWY], [ROWX, ROWY + 400]) === base13, true);
-    eq("控制器 Y 变化 → 形状改变(hMax / 峰高基线随控制器)",
-       sigAt([ROWX, ROWY + 400], [ROWX, ROWY]) !== base13, true);
+    // ③ 无父级等价性: 真实位置 == position → 与最初行为一致
+    eq("无父级时 toComp ≡ transform.position(行为与 v1.5.6 一致)",
+       sigAt([ROWX, ROWY], [ROWX, ROWY]) === base13, true);
 }
 
-// 源码级体检: 基准四处必须取自控制器, 且不得再有裸的 transform.position 基准
+// 源码级体检: 基准四处必须取自 wp(= toComp 的真实位置)
 {
     var core13 = T.buildExprCore(0, 2, 1);
-    eq("基准 X 取自控制器", core13.indexOf("var bx = c.transform.position[0]") >= 0, true);
-    eq("总闸基线 Y 取自控制器", core13.indexOf("hMax = c.transform.position[1]") >= 0, true);
-    eq("峰高基线 Y 取自控制器(总闸循环)", core13.indexOf("pk2 = c.transform.position[1]") >= 0, true);
-    eq("峰高基线 Y 取自控制器(主循环)", core13.indexOf("pk = c.transform.position[1]") >= 0, true);
-    eq("不再有裸的基准 transform.position[0]/[1](会被父级带走)",
-       /(var bx = transform\.position\[0\]|[^.]transform\.position\[1\] - )/.test(core13), false);
-    eq("峰点/缘点仍读各自坐标(它们不设父级, 留在合成坐标系)",
+    eq("求本图层合成真实位置: var wp = thisLayer.toComp(transform.anchorPoint)",
+       core13.indexOf("var wp = thisLayer.toComp(transform.anchorPoint);") >= 0, true);
+    eq("基准 X 用 wp[0]", core13.indexOf("var bx = wp[0] + (i - (N - 1) / 2) * pitch;") >= 0, true);
+    eq("总闸基线 Y 用 wp[1]", core13.indexOf("hMax = wp[1] - HL.transform.position[1];") >= 0, true);
+    eq("峰高基线 Y 用 wp[1](总闸循环)", core13.indexOf("pk2 = wp[1] - P2.transform.position[1];") >= 0, true);
+    eq("峰高基线 Y 用 wp[1](主循环)", core13.indexOf("pk = wp[1] - pp[1];") >= 0, true);
+    eq("不再有以 transform.position 为基准的写法(设父级后是父级坐标系, 会错位)",
+       /(var bx = transform\.position\[0\]|hMax = transform\.position|pk2 = transform\.position|pk = transform\.position)/.test(core13), false);
+    eq("峰点/缘点仍读各自坐标(它们是【固定的地形】, 不该设父级)",
        core13.indexOf("pp = P.transform.position;") >= 0 && core13.indexOf("EL.transform.position[0]") >= 0, true);
 }
+
 
 // ============================================================
 console.log("---------------------------------------------");
