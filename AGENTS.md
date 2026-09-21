@@ -20,6 +20,8 @@
 4. **自写与收集严格分离**：`panels/` `scripts/` 只放自写；收集/第三方脚本一律进 `third-party/`（README 注明来源），不许混入自写目录
 5. **git 推送**：本机无**全局** user.name/email —— 已在本仓库设过仓库级身份（`Simiely <124016031+Simiely@users.noreply.github.com>`，写在 `.git/config`，**不影响其他仓库**）。代理 7890。**2026-09-21 实测**：本仓库直接 push 即可成功，**不再需要** `-c http.https://github.com.proxy=...` 覆盖（此前记的"全局空值会覆盖真实代理"已不成立，别再默认套最复杂的那条命令）。最小可用：`GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.sslVerify=false push https://x-access-token:$GH_TOKEN@github.com/Simiely/ae-tools.git main`
 
+6. **批量改文档要用脚本、且多行锚点必须转行尾**：本仓库文档是 **CRLF**，而脚本里的多行锚点习惯用 `\n` 写 —— 忘了 `old.replace("\n", nl)` 会**静默失配**（2026-09-21 实测：脚本在第 17 行 assert 就中断，后面 README/AGENTS/CHANGELOG 全没执行，但前面几步已写盘，看起来像"改了一半"）。同理 Write/Edit 工具产出的是 LF，改 `.jsx` 时要用脚本统一转回 CRLF + BOM。
+
 ## 约定
 
 - UI 标签用中文；注释用中文；每目录一个 .jsx 主文件（+ 可选 test_*.js 模拟测试）
