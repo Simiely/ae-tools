@@ -1,6 +1,6 @@
 # AGENTS.md · 项目规则
 
-> 📌 **文档基线**：2026-09-21（commit `待本轮 docs commit 回填`）**MountainSpectrum v1.5.8：修正 v1.5.7 方向 —— 柱按【真实位置】采样控制点地形**。用户澄清「控制点是唯一控制起伏的东西，山峰柱根据它的位置跟控制点互动」。基准改用 `thisLayer.toComp(transform.anchorPoint)`：无父级 ≡ transform.position（行为不变）；设父级后柱扫过固定地形、高度按新位置重算、离开影响范围回基础高度。mock 的 layerWorld 与 layerPos 必须可分离才测得出。断言 273 → 286，反向对照 4 处注入 → 8 条变红。（此前本轮已完成：5 个零测试面板补 238 条断言 → 技术债 6 项全清零）
+> 📌 **文档基线**：2026-09-21（commit `9847a20`）**MountainSpectrum v1.5.8：修正 v1.5.7 方向 —— 柱按【真实位置】采样控制点地形**。用户澄清「控制点是唯一控制起伏的东西，山峰柱根据它的位置跟控制点互动」。基准改用 `thisLayer.toComp(transform.anchorPoint)`：无父级 ≡ transform.position（行为不变）；设父级后柱扫过固定地形、高度按新位置重算、离开影响范围回基础高度。mock 的 layerWorld 与 layerPos 必须可分离才测得出。断言 273 → 286，反向对照 4 处注入 → 8 条变红。（此前本轮已完成：5 个零测试面板补 238 条断言 → 技术债 6 项全清零）
 > **更新文档/代码后，请更新此行**（日期 + 新 commit hash），并在 CHANGELOG 追加版本
 
 > 写给 AI / 未来维护者的项目上下文。只记录代码里看不出的信息。
