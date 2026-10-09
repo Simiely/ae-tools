@@ -77,3 +77,4 @@ python install.py --dry-run  # 先看会装什么
 ## 边界
 
 - 本仓库不包含 Simiely/knowledge-base（用户私有知识库，另仓维护，只读引用）。
+- **原独立仓库已归档只读**（2026-10-09）：`TimeAxisIndent` · `AE-Dashed-Grid-Generator` · `AE-Water-Rise-Generator` · `AE-Rolling-Lyrics` · `AE-Lyrics-Animator` · `AudioScale` · `starry-sky-generator` —— 本仓库是它们**唯一源码源**，历史快照留在那些仓库里。
