@@ -1,5 +1,13 @@
 # 更新日志（CHANGELOG）
 
+## 文档维护 · 2026-11-17
+
+- 接入 knowledge-base 的**单项目规范**（spec 2.1.3 / repo-kit 2.7.2，profile `link-only`）
+- 新增 `schema/taxonomy.json`、`tools/repo-kit/`、`tools/update-repo-kit.ps1`、`schema/kit.lock.json` 与 CI
+- 只查链接与入口，**不要求 frontmatter**
+- 71 个 md、66 个相对链接全部纳入检查，首次体检零错
+- 验收：`REPO CHECK: PASS`（ERROR=0）、`KIT LOCK: PASS (v2.7.2, spec=2.1.3)`
+
 ## v1.3.28
 
 - **MountainSpectrum v1.5.7 → v1.5.8**：**修正 v1.5.7 的方向错误**。用户澄清：
