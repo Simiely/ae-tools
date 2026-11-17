@@ -132,4 +132,4 @@ emitDenVal.preferredSize = [40, 18];
 ## 开发环境
 
 - AE 2026 + ExtendScript（ES3）；语法检查 `node --check` / ExtendScript Toolkit
-- 无构建工具；发布 = zip + onepage 落地页
+- 无构建工具；发布 = zip

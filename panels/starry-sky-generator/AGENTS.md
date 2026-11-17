@@ -27,5 +27,5 @@
 ## 常用命令
 
 - 语法检查：`node --check starry-sky-generator.jsx`；开发时用 ExtendScript Toolkit Check Syntax（自动化清洗后必须验证语法）
-- 无构建工具；发布 = 打包 zip + onepage 落地页
+- 无构建工具；发布 = 打包 zip
 - 详细开发记录见 DEVELOPMENT.md；版本历史见 CHANGELOG.md

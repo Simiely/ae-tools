@@ -34,5 +34,3 @@
 - 2D/3D 图层维度冲突（value 关键字继承维度）
 - 频段分离（复制音频层 + Bass & Treble 离线滤波）
 
-### 其他
-- onepage 落地页 + GitHub Pages 部署
