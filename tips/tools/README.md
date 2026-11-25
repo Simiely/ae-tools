@@ -1,6 +1,6 @@
-# 插件使用技巧
+﻿# 插件使用技巧
 
-本仓库 11 个自写插件的进阶用法、踩坑记录。与各插件 `panels/<Tool>/README.md` 互相链接。
+本仓库 12 个自写插件的进阶用法、踩坑记录。与各插件 `panels/<Tool>/README.md` 互相链接。
 
 ## 索引
 
@@ -17,6 +17,7 @@
 | 星空生成器 | [starry-sky-generator.md](starry-sky-generator.md) | `panels/starry-sky-generator/` | 稳定 |
 | 数字计数器 | [NumCounter.md](NumCounter.md) | `panels/NumCounter/` | v0.2.9（已本地验证） |
 | 山峰频谱 | [MountainSpectrum.md](MountainSpectrum.md) | `panels/MountainSpectrum/` | v0.9.0（已本地验证） |
+| 对话文本动画 | [DialogueText.md](DialogueText.md) | `panels/DialogueText/` | v0.11.11（已真机验证） |
 
 ## 新增约定
 

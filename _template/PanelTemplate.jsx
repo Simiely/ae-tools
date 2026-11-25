@@ -390,6 +390,10 @@
     if (thisObj instanceof Panel) {
         // 作为 ScriptUI Panel 嵌在 AE 里: 跟随面板尺寸重排
         thisObj.onResizing = thisObj.onResize = function () { this.layout.resize(); };
+        // ⚠️ 必须有: ScriptUI Panel 不会自动排版"脚本动态添加的控件" ——
+        //    少了这句, 控件都在、日志全绿, 但面板整窗空白。
+        //    (DialogueText v0.1.2 真机事故的根因; NumCounter 等成熟面板也都有这句)
+        try { pal.layout.layout(true); } catch (eLay) {}
     } else {
         // 独立运行(双击 .jsx): 以浮动窗口显示
         pal.preferredSize.width = 360;
