@@ -1,5 +1,18 @@
 ﻿# 更新日志（CHANGELOG）
 
+## v1.3.55
+
+- **DialogueText 文档补充（不改代码）**：
+  - 「索引单位下空格不占索引」精确限定为**半角空格（U+0020）**；
+    全角空格 / 制表 / 换行标注为**未真机验证**（面板 AGENTS / DEVELOPMENT 0T /
+    `AE_API_VERIFIED.md` §8.9 / tips）；
+  - v0.11.9、决策 0R、v1.3.52 里「空格占索引」的旧假设补「已被 v0.11.11 真机否定」标注；
+  - tips 修正两处过期版本检查（v0.11.8 / v0.11.2 → v0.11.11）；
+  - 面板 AGENTS 记录已知架构风险与替代方案（单动画器 + Expression Selector，暂不引入）；
+  - 根 AGENTS 修正 git 推送记录：直连会 `Connection reset`，需代理 7890 + token；
+    无 token 时 credential manager 会挂起（token 只放环境变量，不入库）。
+- 验收：`node test_DialogueText.js` 506 通过 / 0 失败；`python verify.py` 全部通过。
+
 ## v1.3.54
 
 - **DialogueText v0.11.10 → v0.11.11**：修复段落文本「空格后的第一个字从 0 秒起一直显示」
@@ -31,7 +44,8 @@
 
 - **DialogueText v0.11.8 → v0.11.9**：修复段落文本逐字出现「有两个字从 0 秒起一直显示」。
   每字动画器的范围选择器由**百分比**改为**索引单位**
-  （`Units=Index` / `Based On=Characters` / `Start=i` / `End=i+1`，0 基、空格占索引），
+  （`Units=Index` / `Based On=Characters` / `Start=i` / `End=i+1`，0 基；
+  当时假设「空格占索引」，后由 v0.11.11 真机否定），
   只在第一个非空白字探测一次；取不到索引属性时退回百分比并写诊断。
 - 文档：面板四件套 + tips + `AE_API_VERIFIED.md` §8.9 同步；DialogueText 断言 474 → **485**。
 - 验收：`node test_DialogueText.js` 485 通过 / 0 失败；`python verify.py` 全部通过。

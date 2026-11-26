@@ -18,7 +18,7 @@
 2. **无 UI 一次性脚本 ≠ 面板**：放 `ScriptUI Panels/` 会**残留空面板**（AE 固有行为，脚本关不掉）。无 UI 脚本只能放 `scripts/`（自写）或 `third-party/scripts/`（收集）。若脚本被迫在面板目录运行，顶部加 `try { if (this instanceof Window) { this.close(); } } catch (e) {}`（asu_NudgeKeyFrames 已按此改）
 3. **UTF-8 BOM**：Write/Edit 工具产出无 BOM，`install.py` 部署时自动补；`node --check` 不认 `.jsx` 后缀，需复制为 `.js` 再查
 4. **自写与收集严格分离**：`panels/` `scripts/` 只放自写；收集/第三方脚本一律进 `third-party/`（README 注明来源），不许混入自写目录
-5. **git 推送**：本机无**全局** user.name/email —— 已在本仓库设过仓库级身份（`Simiely <124016031+Simiely@users.noreply.github.com>`，写在 `.git/config`，**不影响其他仓库**）。代理 7890。**2026-09-21 实测**：本仓库直接 push 即可成功，**不再需要** `-c http.https://github.com.proxy=...` 覆盖（此前记的"全局空值会覆盖真实代理"已不成立，别再默认套最复杂的那条命令）。最小可用：`GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c http.sslVerify=false push https://x-access-token:$GH_TOKEN@github.com/Simiely/ae-tools.git main`
+5. **git 推送**：本机无**全局** user.name/email —— 已在本仓库设过仓库级身份（`Simiely <124016031+Simiely@users.noreply.github.com>`，写在 `.git/config`，**不影响其他仓库**）。**2026-11-25 实测**：直连 GitHub 会 `Connection reset`，必须走本机代理 7890；没有 token 时 credential manager 会挂起（`GIT_TERMINAL_PROMPT=0` 也拦不住）。可用命令：`git -c http.proxy=http://127.0.0.1:7890 -c http.sslVerify=false push https://x-access-token:$GH_TOKEN@github.com/Simiely/ae-tools.git main`（token 只放环境变量，**别写进仓库/文档**）。2026-09-21 记录的「直接 push 即可成功」已不成立。
 
 6. **批量改文档要用脚本、且多行锚点必须转行尾**：本仓库文档是 **CRLF**，而脚本里的多行锚点习惯用 `\n` 写 —— 忘了 `old.replace("\n", nl)` 会**静默失配**（2026-09-21 实测：脚本在第 17 行 assert 就中断，后面 README/AGENTS/CHANGELOG 全没执行，但前面几步已写盘，看起来像"改了一半"）。同理 Write/Edit 工具产出的是 LF，改 `.jsx` 时要用脚本统一转回 CRLF + BOM。
 

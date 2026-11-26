@@ -144,7 +144,7 @@ AE 的 ScriptUI handler 抛错是**完全静默**的（没有控制台）—— 
   `Units=Index(2)` + `Based On=Characters(1)`，再写
   `ADBE Text Index Start/End` = `selIdx / selIdx+1`，精确只选第 selIdx+1 个**可见**字符
   （`selIdx` = 非空白字符序号，0 基，来自 `countVisibleChars`）；
-  ⚠️ **AE 26 真机：索引单位下空格不占索引**（官方帮助说「依据=字符」数空格，实测不数）——
+  ⚠️ **AE 26 真机：索引单位下半角空格不占索引**（官方帮助说「依据=字符」数空格，实测不数）——
   必须用 `selIdx`，不能用原文下标 `i`：空格被跳过后，原文下标会让空格后第一个字
   没有任何动画器覆盖、从 0 秒起一直显示，后面所有字也整体早一拍（v0.11.11 修复）；
   百分比 `i/n*100` 在 n 不能整除 100 时会被 AE 按字符边界取整，
@@ -155,6 +155,11 @@ AE 的 ScriptUI handler 抛错是**完全静默**的（没有控制台）—— 
   选区获取要**防御性**：`if (selGroup.numProperties > 0) sel = selGroup.property(1)`，
   取不到才 `addRangeSelector`，避免不同 AE 版本自带默认选区时多出一个；
   三处动画器创建（`applyScroll` / `applyTypeScroll` / `applyTypewriter`）同一写法。
+  ⚠️ **已知架构风险**：这套「每字一个动画器 + 一个索引选区」依赖 AE 的索引语义。
+  已真机验证的只有**半角空格**（U+0020）不占索引；全角空格 / 制表 / 换行未验证，
+  遇到时先核对日志 `N 字(可见 M)` 与实际是否一致，再决定是否按该空白拆段。
+  更彻底的替代方案是**单动画器 + Expression Selector**（按时间算不透明度，不再枚举索引），
+  属于大改，暂不引入（见 DEVELOPMENT 决策 0T）。
 - **应用顺序：先清理旧动画，再测量文字范围**。
   `sourceRectAtTime` 会把旧滚动表达式的位移算进去，顺序反了起止点会偏。
 - **段落文本（框文本）必须先解决溢出再测量，且不能拉高用户的框**：
@@ -218,7 +223,8 @@ node test_DialogueText.js
           （重复应用仍按原框当窗口）+ 段落文本窗口一律 = 段落框 /
   v0.11.9 （已撤回）索引单位只切了第一个动画器 + 仍写百分比 Start/End，
           真机报「属性或父级属性被隐藏」/
-  v0.11.10 每个动画器**逐个**切索引单位；切完写 `ADBE Text Index Start/End`（i / i+1）；
+  v0.11.10 每个动画器**逐个**切索引单位；切完写 `ADBE Text Index Start/End`（i / i+1，
+          后被 v0.11.11 修正为 selIdx）；
           取不到索引属性就切回百分比、绝不混用 —— 修复「有两个字从 0 秒起一直显示」/
   v0.11.11 选区索引与节奏改用**非空白字符序号**：新增 `countVisibleChars`；
           `visN` 驱动时间轴/位置表达式；循环用 `selIdx` 写 Index Start/End、关键帧时间
@@ -298,6 +304,6 @@ python install.py     # 部署（重启 AE 后生效）
 
 ## 基线
 
-> 📌 **文档基线**：2026-11-25 · 对话文本动画 **v0.11.11** / 仓库 **v1.3.54**
+> 📌 **文档基线**：2026-11-26 · 对话文本动画 **v0.11.11** / 仓库 **v1.3.55**
 > 骨架约定出自 MountainSpectrum v1.5.6 的踩坑史，
 > 详见 `../../panels/MountainSpectrum/DEVELOPMENT.md`。
